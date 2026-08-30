@@ -107,6 +107,38 @@ app.get("/api/products", async (req, res) => {
   }
 });
 
+app.post("/api/products", async (req, res) => {
+  try {
+    const { name, description, price } = req.body;
+
+    if (!name || price === undefined) {
+      return res.status(400).json({
+        ok: false,
+        message: "Name and price are required"
+      });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO products (name, description, price)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [name, description || "", price]
+    );
+
+    res.status(201).json({
+      ok: true,
+      product: result.rows[0]
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to create product"
+    });
+  }
+});
+
 // Wallet
 app.get("/api/wallet", (req, res) => {
   res.json({
