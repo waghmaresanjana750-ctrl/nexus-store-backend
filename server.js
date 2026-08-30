@@ -115,6 +115,15 @@ app.get("/api/products", async (req, res) => {
 // Add product
 app.post("/api/products", async (req, res) => {
   try {
+    const adminKey = req.headers["x-admin-key"];
+
+    if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
+      return res.status(401).json({
+        ok: false,
+        message: "Unauthorized"
+      });
+    }
+
     const { name, description, price, duration } = req.body;
 
     if (!name || price === undefined) {
