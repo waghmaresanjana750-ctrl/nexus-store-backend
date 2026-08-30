@@ -39,8 +39,8 @@ async function setupDatabase() {
       name TEXT NOT NULL,
       description TEXT,
       price NUMERIC DEFAULT 0,
+      duration TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
 
     CREATE TABLE IF NOT EXISTS customers (
       id SERIAL PRIMARY KEY,
