@@ -32,6 +32,44 @@ app.get("/api/db-test", async (req, res) => {
   }
 });
 
+async function setupDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      price NUMERIC DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS customers (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      email TEXT UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS wallets (
+      id SERIAL PRIMARY KEY,
+      customer_id INTEGER REFERENCES customers(id),
+      balance NUMERIC DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS orders (
+      id SERIAL PRIMARY KEY,
+      customer_id INTEGER REFERENCES customers(id),
+      product_id INTEGER REFERENCES products(id),
+      amount NUMERIC DEFAULT 0,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  console.log("Database tables ready");
+}
+
+setupDatabase().catch(console.error);
+
 // Home
 app.get("/", (req, res) => {
   res.json({
