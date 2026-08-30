@@ -33,6 +33,7 @@ app.get("/api/db-test", async (req, res) => {
 });
 
 async function setupDatabase() {
+async function setupDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
       id SERIAL PRIMARY KEY,
@@ -41,6 +42,7 @@ async function setupDatabase() {
       price NUMERIC DEFAULT 0,
       duration TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
 
     CREATE TABLE IF NOT EXISTS customers (
       id SERIAL PRIMARY KEY,
@@ -63,6 +65,9 @@ async function setupDatabase() {
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    ALTER TABLE products
+    ADD COLUMN IF NOT EXISTS duration TEXT;
   `);
 
   console.log("Database tables ready");
