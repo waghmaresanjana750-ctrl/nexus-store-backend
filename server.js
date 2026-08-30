@@ -32,7 +32,7 @@ app.get("/api/db-test", async (req, res) => {
   }
 });
 
-async function setupDatabase() {
+// Database setup
 async function setupDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
@@ -112,9 +112,10 @@ app.get("/api/products", async (req, res) => {
   }
 });
 
+// Add product
 app.post("/api/products", async (req, res) => {
   try {
-    const { name, description, price } = req.body;
+    const { name, description, price, duration } = req.body;
 
     if (!name || price === undefined) {
       return res.status(400).json({
@@ -124,10 +125,10 @@ app.post("/api/products", async (req, res) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO products (name, description, price)
-       VALUES ($1, $2, $3)
+      `INSERT INTO products (name, description, price, duration)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [name, description || "", price]
+      [name, description || "", price, duration || ""]
     );
 
     res.status(201).json({
