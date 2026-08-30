@@ -18,6 +18,27 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+app.get("/api/products", (req, res) => {
+  res.json({
+    ok: true,
+    products: []
+  });
+});
+
+app.get("/api/orders", (req, res) => {
+  res.json({
+    ok: true,
+    orders: []
+  });
+});
+
+app.get("/api/wallet", (req, res) => {
+  res.json({
+    ok: true,
+    balance: 0
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
