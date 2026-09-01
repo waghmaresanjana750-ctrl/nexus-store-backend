@@ -18,209 +18,157 @@ const pool = new Pool({
   }
 });
 
-
-/* =========================================
-   DATABASE TEST
-========================================= */
-
-app.get("/api/db-test", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT NOW()");
-
-    res.json({
-      ok: true,
-      database: "connected",
-      time: result.rows[0].now
-    });
-
-  } catch (error) {
-
-    console.error("DB TEST ERROR:", error);
-
-    res.status(500).json({
-      ok: false,
-      database: "connection failed"
-    });
-
-  }
-});
-
-
 /* =========================================
    DATABASE SETUP
 ========================================= */
 
 async function setupDatabase() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        price NUMERIC(12,2) DEFAULT 0,
+        duration TEXT DEFAULT '',
+        prices JSONB DEFAULT '{}'::jsonb,
+        video TEXT DEFAULT '',
+        pid TEXT DEFAULT '',
+        category TEXT DEFAULT '',
+        maintenance BOOLEAN DEFAULT false,
+        status TEXT DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
 
-  await pool.query(`
-    
-    /* PRODUCTS */
+      CREATE TABLE IF NOT EXISTS customers (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
 
-    CREATE TABLE IF NOT EXISTS products (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      price NUMERIC DEFAULT 0,
-      duration TEXT DEFAULT '',
-      prices JSONB DEFAULT '{}'::jsonb,
-      video TEXT DEFAULT '',
-      pid TEXT DEFAULT '',
-      category TEXT DEFAULT 'ALL',
-      maintenance BOOLEAN DEFAULT FALSE,
-      status TEXT DEFAULT 'active',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+      CREATE TABLE IF NOT EXISTS wallets (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER UNIQUE NOT NULL
+          REFERENCES customers(id)
+          ON DELETE CASCADE,
+        balance NUMERIC(12,2) NOT NULL DEFAULT 0
+          CHECK (balance >= 0),
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
 
+      CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER NOT NULL
+          REFERENCES customers(id)
+          ON DELETE CASCADE,
+        product_id INTEGER NOT NULL
+          REFERENCES products(id)
+          ON DELETE CASCADE,
+        product_name TEXT DEFAULT '',
+        duration TEXT DEFAULT '',
+        amount NUMERIC(12,2) NOT NULL,
+        status TEXT DEFAULT 'completed',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
 
-    /* CUSTOMERS */
+      CREATE TABLE IF NOT EXISTS wallet_requests (
+        id SERIAL PRIMARY KEY,
 
-    CREATE TABLE IF NOT EXISTS customers (
-      id SERIAL PRIMARY KEY,
-      name TEXT DEFAULT '',
-      email TEXT UNIQUE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+        customer_id INTEGER NOT NULL
+          REFERENCES customers(id)
+          ON DELETE CASCADE,
 
+        amount NUMERIC(12,2) NOT NULL
+          CHECK (amount > 0),
 
-    /* WALLETS */
+        utr TEXT NOT NULL,
 
-    CREATE TABLE IF NOT EXISTS wallets (
-      id SERIAL PRIMARY KEY,
-      customer_id INTEGER UNIQUE
-        REFERENCES customers(id)
-        ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (
+            status IN (
+              'pending',
+              'approved',
+              'rejected'
+            )
+          ),
 
-      balance NUMERIC(12,2)
-        DEFAULT 0
-        CHECK (balance >= 0),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-      updated_at TIMESTAMP
-        DEFAULT CURRENT_TIMESTAMP
-    );
+        reviewed_at TIMESTAMP
+      );
+    `);
 
+    /* =========================================
+       OLD DATABASE FIXES
+    ========================================= */
 
-    /* ORDERS */
+    await pool.query(`
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
 
-    CREATE TABLE IF NOT EXISTS orders (
-      id SERIAL PRIMARY KEY,
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS price NUMERIC(12,2) DEFAULT 0;
 
-      customer_id INTEGER
-        REFERENCES customers(id)
-        ON DELETE SET NULL,
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS duration TEXT DEFAULT '';
 
-      product_id INTEGER
-        REFERENCES products(id)
-        ON DELETE SET NULL,
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS prices JSONB DEFAULT '{}'::jsonb;
 
-      product_name TEXT DEFAULT '',
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS video TEXT DEFAULT '';
 
-      pid TEXT DEFAULT '',
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS pid TEXT DEFAULT '';
 
-      duration TEXT DEFAULT '',
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS category TEXT DEFAULT '';
 
-      amount NUMERIC(12,2)
-        DEFAULT 0,
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS maintenance BOOLEAN DEFAULT false;
 
-      status TEXT
-        DEFAULT 'completed',
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
+    `);
 
-      created_at TIMESTAMP
-        DEFAULT CURRENT_TIMESTAMP
-    );
+    /* =========================================
+       UNIQUE CONSTRAINTS
+    ========================================= */
 
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS
+      wallets_customer_id_unique
+      ON wallets(customer_id);
+    `);
 
-    /* PRODUCT COLUMNS FOR OLD DATABASE */
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS
+      wallet_requests_utr_unique
+      ON wallet_requests(LOWER(utr));
+    `);
 
-    ALTER TABLE products
-      ADD COLUMN IF NOT EXISTS prices JSONB
-      DEFAULT '{}'::jsonb;
+    console.log("DATABASE SETUP COMPLETE");
 
-    ALTER TABLE products
-      ADD COLUMN IF NOT EXISTS video TEXT
-      DEFAULT '';
-
-    ALTER TABLE products
-      ADD COLUMN IF NOT EXISTS pid TEXT
-      DEFAULT '';
-
-    ALTER TABLE products
-      ADD COLUMN IF NOT EXISTS category TEXT
-      DEFAULT 'ALL';
-
-    ALTER TABLE products
-      ADD COLUMN IF NOT EXISTS maintenance BOOLEAN
-      DEFAULT FALSE;
-
-    ALTER TABLE products
-      ADD COLUMN IF NOT EXISTS status TEXT
-      DEFAULT 'active';
-
-    ALTER TABLE products
-      ADD COLUMN IF NOT EXISTS duration TEXT;
-
-  `);
-
-  console.log("Database tables ready");
+  } catch (error) {
+    console.error("DATABASE SETUP ERROR:", error);
+  }
 }
 
-
-/* =========================================
-   START DATABASE SETUP
-========================================= */
-
-setupDatabase().catch(error => {
-
-  console.error(
-    "DATABASE SETUP ERROR:",
-    error
-  );
-
-});
-
-
-/* =========================================
-   HOME
-========================================= */
-
-app.get("/", (req, res) => {
-
-  res.json({
-    ok: true,
-    message: "Nexus Store backend is working"
-  });
-
-});
-
-
-/* =========================================
-   HEALTH
-========================================= */
-
-app.get("/api/health", (req, res) => {
-
-  res.json({
-    ok: true,
-    message: "Backend is healthy"
-  });
-
-});
-
+setupDatabase();
 
 /* =========================================
    ADMIN AUTH
 ========================================= */
 
 function checkAdmin(req, res) {
-
-  const adminKey =
-    req.headers["x-admin-key"];
+  const adminKey = req.headers["x-admin-key"];
 
   if (
     !adminKey ||
     !process.env.ADMIN_KEY ||
     adminKey !== process.env.ADMIN_KEY
   ) {
-
     res.status(401).json({
       ok: false,
       message: "Unauthorized"
@@ -232,1759 +180,1343 @@ function checkAdmin(req, res) {
   return true;
 }
 
+/* =========================================
+   HEALTH
+========================================= */
+
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    message: "NEXUS STORE BACKEND RUNNING"
+  });
+});
 
 /* =========================================
-   GET PRODUCTS
+   DB TEST
+========================================= */
+
+app.get("/api/db-test", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT NOW() AS time
+    `);
+
+    res.json({
+      ok: true,
+      database: "connected",
+      time: result.rows[0].time
+    });
+
+  } catch (error) {
+    console.error("DB TEST ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Database connection failed"
+    });
+  }
+});
+
+/* =========================================
+   PRODUCTS - PUBLIC
 ========================================= */
 
 app.get("/api/products", async (req, res) => {
-
   try {
-
-    const result =
-      await pool.query(`
-        SELECT
-          id,
-          name,
-          description,
-          price,
-          duration,
-          prices,
-          video,
-          pid,
-          category,
-          maintenance,
-          status,
-          created_at
-
-        FROM products
-
-        ORDER BY id DESC
-      `);
-
+    const result = await pool.query(`
+      SELECT *
+      FROM products
+      ORDER BY id DESC
+    `);
 
     res.json({
       ok: true,
       products: result.rows
     });
 
-
   } catch (error) {
-
-    console.error(
-      "GET PRODUCTS ERROR:",
-      error
-    );
-
+    console.error("PRODUCT GET ERROR:", error);
 
     res.status(500).json({
       ok: false,
-      message:
-        "Products table is not ready yet"
+      message: "Failed to load products"
     });
-
   }
-
 });
 
-
 /* =========================================
-   ADD PRODUCT
+   PRODUCTS - ADMIN ADD
 ========================================= */
 
 app.post("/api/products", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
 
   try {
-
-    if (!checkAdmin(req, res))
-      return;
-
-
     const {
       name,
-      pid,
-      category,
-      description,
-      video,
-      price,
-      duration,
-      prices
+      description = "",
+      price = 0,
+      duration = "",
+      prices = {},
+      video = "",
+      pid = "",
+      category = "",
+      maintenance = false,
+      status = "active"
     } = req.body;
 
-
-    if (!name) {
-
+    if (!name || !String(name).trim()) {
       return res.status(400).json({
         ok: false,
-        message:
-          "Product name is required"
+        message: "Product name required"
       });
-
     }
 
+    const result = await pool.query(`
+      INSERT INTO products
+      (
+        name,
+        description,
+        price,
+        duration,
+        prices,
+        video,
+        pid,
+        category,
+        maintenance,
+        status
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *
+    `, [
+      String(name).trim(),
+      description,
+      Number(price) || 0,
+      duration,
+      prices,
+      video,
+      pid,
+      category,
+      Boolean(maintenance),
+      status
+    ]);
 
-    const productPrices =
-      prices &&
-      typeof prices === "object"
-        ? prices
-        : {};
-
-
-    let mainPrice =
-      Number(price) || 0;
-
-
-    if (
-      !mainPrice &&
-      productPrices["1 Day"] !== undefined
-    ) {
-
-      mainPrice =
-        Number(
-          productPrices["1 Day"]
-        ) || 0;
-
-    }
-
-
-    const result =
-      await pool.query(
-        `
-        INSERT INTO products
-        (
-          name,
-          pid,
-          category,
-          description,
-          video,
-          price,
-          duration,
-          prices,
-          maintenance,
-          status
-        )
-
-        VALUES
-        (
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          $6,
-          $7,
-          $8::jsonb,
-          FALSE,
-          'active'
-        )
-
-        RETURNING *
-        `,
-        [
-          name,
-          pid || "",
-          category || "ALL",
-          description || "",
-          video || "",
-          mainPrice,
-          duration || "",
-          JSON.stringify(productPrices)
-        ]
-      );
-
-
-    res.status(201).json({
+    res.json({
       ok: true,
-      message:
-        "Product added successfully",
-      product:
-        result.rows[0]
+      product: result.rows[0]
     });
 
-
   } catch (error) {
-
-    console.error(
-      "ADD PRODUCT ERROR:",
-      error
-    );
-
+    console.error("PRODUCT CREATE ERROR:", error);
 
     res.status(500).json({
       ok: false,
-      message:
-        "Failed to create product"
+      message: "Failed to create product"
     });
-
   }
-
 });
 
-
 /* =========================================
-   MAINTENANCE ON / OFF
+   PRODUCT MAINTENANCE
 ========================================= */
 
-app.patch(
-  "/api/products/:id/maintenance",
-  async (req, res) => {
+app.patch("/api/products/:id/maintenance", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
 
-    try {
+  try {
+    const id = Number(req.params.id);
+    const maintenance = Boolean(req.body.maintenance);
 
-      if (!checkAdmin(req, res))
-        return;
+    const result = await pool.query(`
+      UPDATE products
+      SET maintenance = $1
+      WHERE id = $2
+      RETURNING *
+    `, [
+      maintenance,
+      id
+    ]);
 
-
-      const id =
-        Number(req.params.id);
-
-
-      if (!Number.isInteger(id)) {
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Invalid product ID"
-        });
-
-      }
-
-
-      const maintenance =
-        req.body.maintenance;
-
-
-      if (
-        typeof maintenance !==
-        "boolean"
-      ) {
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "maintenance must be true or false"
-        });
-
-      }
-
-
-      const status =
-        maintenance
-          ? "maintenance"
-          : "active";
-
-
-      const result =
-        await pool.query(
-          `
-          UPDATE products
-
-          SET
-            maintenance = $1,
-            status = $2
-
-          WHERE id = $3
-
-          RETURNING *
-          `,
-          [
-            maintenance,
-            status,
-            id
-          ]
-        );
-
-
-      if (!result.rows.length) {
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Product not found"
-        });
-
-      }
-
-
-      res.json({
-        ok: true,
-
-        message:
-          maintenance
-            ? "Maintenance enabled"
-            : "Maintenance disabled",
-
-        product:
-          result.rows[0]
-      });
-
-
-    } catch (error) {
-
-      console.error(
-        "MAINTENANCE ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
+    if (!result.rows.length) {
+      return res.status(404).json({
         ok: false,
-        message:
-          "Failed to update maintenance"
+        message: "Product not found"
       });
-
     }
 
-  }
-);
+    res.json({
+      ok: true,
+      product: result.rows[0]
+    });
 
+  } catch (error) {
+    console.error("MAINTENANCE ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to update maintenance"
+    });
+  }
+});
 
 /* =========================================
-   UPDATE PRODUCT
+   PRODUCT UPDATE
 ========================================= */
 
-app.patch(
-  "/api/products/:id",
-  async (req, res) => {
+app.patch("/api/products/:id", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
 
-    try {
+  try {
+    const id = Number(req.params.id);
 
-      if (!checkAdmin(req, res))
-        return;
+    const {
+      name,
+      description,
+      price,
+      duration,
+      prices,
+      video,
+      pid,
+      category,
+      maintenance,
+      status
+    } = req.body;
 
+    const result = await pool.query(`
+      UPDATE products
+      SET
+        name = COALESCE($1, name),
+        description = COALESCE($2, description),
+        price = COALESCE($3, price),
+        duration = COALESCE($4, duration),
+        prices = COALESCE($5, prices),
+        video = COALESCE($6, video),
+        pid = COALESCE($7, pid),
+        category = COALESCE($8, category),
+        maintenance = COALESCE($9, maintenance),
+        status = COALESCE($10, status)
+      WHERE id = $11
+      RETURNING *
+    `, [
+      name,
+      description,
+      price === undefined ? null : Number(price),
+      duration,
+      prices,
+      video,
+      pid,
+      category,
+      maintenance,
+      status,
+      id
+    ]);
 
-      const id =
-        Number(req.params.id);
-
-
-      if (!Number.isInteger(id)) {
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Invalid product ID"
-        });
-
-      }
-
-
-      const {
-        name,
-        pid,
-        category,
-        description,
-        video,
-        price,
-        duration,
-        prices
-      } = req.body;
-
-
-      const result =
-        await pool.query(
-          `
-          UPDATE products
-
-          SET
-
-            name =
-              COALESCE($1, name),
-
-            pid =
-              COALESCE($2, pid),
-
-            category =
-              COALESCE($3, category),
-
-            description =
-              COALESCE($4, description),
-
-            video =
-              COALESCE($5, video),
-
-            price =
-              COALESCE($6, price),
-
-            duration =
-              COALESCE($7, duration),
-
-            prices =
-              COALESCE(
-                $8::jsonb,
-                prices
-              )
-
-          WHERE id = $9
-
-          RETURNING *
-          `,
-          [
-
-            name ?? null,
-
-            pid ?? null,
-
-            category ?? null,
-
-            description ?? null,
-
-            video ?? null,
-
-            price !== undefined
-              ? Number(price)
-              : null,
-
-            duration ?? null,
-
-            prices
-              ? JSON.stringify(prices)
-              : null,
-
-            id
-
-          ]
-        );
-
-
-      if (!result.rows.length) {
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Product not found"
-        });
-
-      }
-
-
-      res.json({
-        ok: true,
-        product:
-          result.rows[0]
-      });
-
-
-    } catch (error) {
-
-      console.error(
-        "UPDATE PRODUCT ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
+    if (!result.rows.length) {
+      return res.status(404).json({
         ok: false,
-        message:
-          "Failed to update product"
+        message: "Product not found"
       });
-
     }
 
-  }
-);
+    res.json({
+      ok: true,
+      product: result.rows[0]
+    });
 
+  } catch (error) {
+    console.error("PRODUCT UPDATE ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to update product"
+    });
+  }
+});
 
 /* =========================================
-   DELETE PRODUCT
+   PRODUCT DELETE
 ========================================= */
 
-app.delete(
-  "/api/products/:id",
-  async (req, res) => {
+app.delete("/api/products/:id", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
 
-    try {
+  try {
+    const id = Number(req.params.id);
 
-      if (!checkAdmin(req, res))
-        return;
+    const result = await pool.query(`
+      DELETE FROM products
+      WHERE id = $1
+      RETURNING *
+    `, [id]);
 
-
-      const id =
-        Number(req.params.id);
-
-
-      if (!Number.isInteger(id)) {
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Invalid product ID"
-        });
-
-      }
-
-
-      const result =
-        await pool.query(
-          `
-          DELETE FROM products
-
-          WHERE id = $1
-
-          RETURNING *
-          `,
-          [id]
-        );
-
-
-      if (!result.rows.length) {
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Product not found"
-        });
-
-      }
-
-
-      res.json({
-        ok: true,
-        message:
-          "Product deleted",
-        product:
-          result.rows[0]
-      });
-
-
-    } catch (error) {
-
-      console.error(
-        "DELETE PRODUCT ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
+    if (!result.rows.length) {
+      return res.status(404).json({
         ok: false,
-        message:
-          "Failed to delete product"
+        message: "Product not found"
       });
-
     }
 
-  }
-);
+    res.json({
+      ok: true,
+      message: "Product deleted"
+    });
 
+  } catch (error) {
+    console.error("PRODUCT DELETE ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to delete product"
+    });
+  }
+});
 
 /* =========================================
-   CREATE / GET CUSTOMER
+   CUSTOMER CREATE / UPDATE
 ========================================= */
 
-app.post(
-  "/api/customers",
-  async (req, res) => {
+app.post("/api/customers", async (req, res) => {
+  try {
+    const {
+      name,
+      email
+    } = req.body;
 
-    try {
+    const cleanName = String(name || "").trim();
+    const cleanEmail = String(email || "").trim().toLowerCase();
 
-      const {
+    if (!cleanName || !cleanEmail) {
+      return res.status(400).json({
+        ok: false,
+        message: "Name and email required"
+      });
+    }
+
+    const customerResult = await pool.query(`
+      INSERT INTO customers
+      (
         name,
         email
-      } = req.body;
+      )
+      VALUES
+      ($1,$2)
 
+      ON CONFLICT (email)
+      DO UPDATE SET
+        name = EXCLUDED.name
 
-      if (!email) {
+      RETURNING *
+    `, [
+      cleanName,
+      cleanEmail
+    ]);
 
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Email is required"
-        });
+    const customer = customerResult.rows[0];
 
-      }
+    const walletResult = await pool.query(`
+      INSERT INTO wallets
+      (
+        customer_id,
+        balance
+      )
+      VALUES
+      ($1,0)
 
+      ON CONFLICT (customer_id)
+      DO UPDATE SET
+        updated_at = CURRENT_TIMESTAMP
 
-      const cleanEmail =
-        String(email)
-          .trim()
-          .toLowerCase();
+      RETURNING *
+    `, [
+      customer.id
+    ]);
 
+    res.json({
+      ok: true,
+      customer,
+      wallet: walletResult.rows[0]
+    });
 
-      const cleanName =
-        String(name || "")
-          .trim();
+  } catch (error) {
+    console.error("CUSTOMER CREATE ERROR:", error);
 
-
-      /*
-        Create customer if not exists.
-        Otherwise update name.
-      */
-
-      const customerResult =
-        await pool.query(
-          `
-          INSERT INTO customers
-          (
-            name,
-            email
-          )
-
-          VALUES
-          (
-            $1,
-            $2
-          )
-
-          ON CONFLICT(email)
-
-          DO UPDATE SET
-            name = EXCLUDED.name
-
-          RETURNING *
-          `,
-          [
-            cleanName,
-            cleanEmail
-          ]
-        );
-
-
-      const customer =
-        customerResult.rows[0];
-
-
-      /*
-        Create wallet automatically.
-      */
-
-      const walletResult =
-        await pool.query(
-          `
-          INSERT INTO wallets
-          (
-            customer_id,
-            balance
-          )
-
-          VALUES
-          (
-            $1,
-            0
-          )
-
-          ON CONFLICT(customer_id)
-          DO NOTHING
-
-          RETURNING *
-          `,
-          [
-            customer.id
-          ]
-        );
-
-
-      let wallet;
-
-
-      if(walletResult.rows.length){
-
-        wallet =
-          walletResult.rows[0];
-
-      }else{
-
-        const existingWallet =
-          await pool.query(
-            `
-            SELECT *
-            FROM wallets
-            WHERE customer_id = $1
-            `,
-            [
-              customer.id
-            ]
-          );
-
-        wallet =
-          existingWallet.rows[0];
-
-      }
-
-
-      res.json({
-        ok: true,
-
-        customer: {
-          id: customer.id,
-          name: customer.name,
-          email: customer.email
-        },
-
-        wallet: {
-          balance:
-            Number(wallet.balance)
-        }
-      });
-
-
-    } catch (error) {
-
-      console.error(
-        "CUSTOMER CREATE ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
-        ok: false,
-        message:
-          "Failed to create customer"
-      });
-
-    }
-
+    res.status(500).json({
+      ok: false,
+      message: "Failed to create customer"
+    });
   }
-);
-
+});
 
 /* =========================================
-   GET CUSTOMER
+   CUSTOMER GET
 ========================================= */
 
-app.get(
-  "/api/customers/:id",
-  async (req, res) => {
+app.get("/api/customers/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
 
-    try {
+    const result = await pool.query(`
+      SELECT
+        c.*,
+        COALESCE(w.balance,0) AS balance
+      FROM customers c
+      LEFT JOIN wallets w
+        ON w.customer_id = c.id
+      WHERE c.id = $1
+    `, [id]);
 
-      const customerId =
-        Number(req.params.id);
-
-
-      if(!Number.isInteger(customerId)){
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Invalid customer ID"
-        });
-
-      }
-
-
-      const result =
-        await pool.query(
-          `
-          SELECT
-            c.id,
-            c.name,
-            c.email,
-            c.created_at,
-
-            COALESCE(
-              w.balance,
-              0
-            ) AS balance
-
-          FROM customers c
-
-          LEFT JOIN wallets w
-            ON w.customer_id = c.id
-
-          WHERE c.id = $1
-          `,
-          [
-            customerId
-          ]
-        );
-
-
-      if(!result.rows.length){
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Customer not found"
-        });
-
-      }
-
-
-      res.json({
-        ok: true,
-        customer:
-          result.rows[0]
-      });
-
-
-    } catch(error){
-
-      console.error(
-        "GET CUSTOMER ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
+    if (!result.rows.length) {
+      return res.status(404).json({
         ok: false,
-        message:
-          "Failed to get customer"
+        message: "Customer not found"
       });
-
     }
 
-  }
-);
+    res.json({
+      ok: true,
+      customer: result.rows[0]
+    });
 
+  } catch (error) {
+    console.error("CUSTOMER GET ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to load customer"
+    });
+  }
+});
 
 /* =========================================
-   WALLET BALANCE
+   WALLET GET
 ========================================= */
 
-app.get(
-  "/api/wallet/:customerId",
-  async (req, res) => {
+app.get("/api/wallet/:customerId", async (req, res) => {
+  try {
+    const customerId = Number(req.params.customerId);
 
-    try {
+    const result = await pool.query(`
+      SELECT
+        customer_id,
+        balance,
+        updated_at
+      FROM wallets
+      WHERE customer_id = $1
+    `, [customerId]);
 
-      const customerId =
-        Number(
-          req.params.customerId
-        );
-
-
-      if(!Number.isInteger(customerId)){
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Invalid customer ID"
-        });
-
-      }
-
-
-      const result =
-        await pool.query(
-          `
-          SELECT
-            c.id AS customer_id,
-
-            COALESCE(
-              w.balance,
-              0
-            ) AS balance
-
-          FROM customers c
-
-          LEFT JOIN wallets w
-            ON w.customer_id = c.id
-
-          WHERE c.id = $1
-          `,
-          [
-            customerId
-          ]
-        );
-
-
-      if(!result.rows.length){
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Customer not found"
-        });
-
-      }
-
-
-      res.json({
+    if (!result.rows.length) {
+      return res.json({
         ok: true,
-
-        customer_id:
-          result.rows[0].customer_id,
-
-        balance:
-          Number(
-            result.rows[0].balance
-          )
+        customerId,
+        balance: 0
       });
-
-
-    } catch(error){
-
-      console.error(
-        "GET WALLET ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
-        ok: false,
-        message:
-          "Failed to get wallet"
-      });
-
     }
 
-  }
-);
+    res.json({
+      ok: true,
+      wallet: result.rows[0],
+      balance: Number(result.rows[0].balance)
+    });
 
+  } catch (error) {
+    console.error("WALLET GET ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to load wallet"
+    });
+  }
+});
 
 /* =========================================
    ADMIN ADD WALLET BALANCE
 ========================================= */
 
-app.post(
-  "/api/wallet/:customerId/add",
-  async (req, res) => {
+app.post("/api/wallet/:customerId/add", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  try {
+    const customerId = Number(req.params.customerId);
+    const amount = Number(req.body.amount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid amount"
+      });
+    }
+
+    const customer = await pool.query(`
+      SELECT id
+      FROM customers
+      WHERE id = $1
+    `, [customerId]);
+
+    if (!customer.rows.length) {
+      return res.status(404).json({
+        ok: false,
+        message: "Customer not found"
+      });
+    }
+
+    const result = await pool.query(`
+      INSERT INTO wallets
+      (
+        customer_id,
+        balance
+      )
+      VALUES
+      ($1,$2)
+
+      ON CONFLICT (customer_id)
+      DO UPDATE SET
+        balance = wallets.balance + EXCLUDED.balance,
+        updated_at = CURRENT_TIMESTAMP
+
+      RETURNING *
+    `, [
+      customerId,
+      amount
+    ]);
+
+    res.json({
+      ok: true,
+      wallet: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error("ADMIN WALLET ADD ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to add wallet balance"
+    });
+  }
+});
+
+/* =========================================
+   CREATE WALLET PAYMENT REQUEST
+========================================= */
+
+app.post("/api/wallet-requests", async (req, res) => {
+  try {
+    const customerId = Number(req.body.customerId);
+    const amount = Number(req.body.amount);
+    const utr = String(req.body.utr || "").trim();
+
+    if (!customerId) {
+      return res.status(400).json({
+        ok: false,
+        message: "Customer ID required"
+      });
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid amount"
+      });
+    }
+
+    if (amount > 1000000) {
+      return res.status(400).json({
+        ok: false,
+        message: "Amount too large"
+      });
+    }
+
+    if (!utr || utr.length < 4 || utr.length > 100) {
+      return res.status(400).json({
+        ok: false,
+        message: "Valid UTR required"
+      });
+    }
+
+    const customerResult = await pool.query(`
+      SELECT id
+      FROM customers
+      WHERE id = $1
+    `, [customerId]);
+
+    if (!customerResult.rows.length) {
+      return res.status(404).json({
+        ok: false,
+        message: "Customer not found"
+      });
+    }
 
     try {
+      const result = await pool.query(`
+        INSERT INTO wallet_requests
+        (
+          customer_id,
+          amount,
+          utr
+        )
+        VALUES
+        ($1,$2,$3)
 
-      if (!checkAdmin(req, res))
-        return;
+        RETURNING *
+      `, [
+        customerId,
+        amount,
+        utr
+      ]);
 
+      res.json({
+        ok: true,
+        message: "Payment request submitted",
+        request: result.rows[0]
+      });
 
-      const customerId =
-        Number(
-          req.params.customerId
-        );
+    } catch (insertError) {
 
-
-      const amount =
-        Number(
-          req.body.amount
-        );
-
-
-      if(
-        !Number.isInteger(customerId) ||
-        !isFinite(amount) ||
-        amount <= 0
-      ){
-
-        return res.status(400).json({
+      if (insertError.code === "23505") {
+        return res.status(409).json({
           ok: false,
-          message:
-            "Invalid customer ID or amount"
+          message: "This UTR has already been submitted"
         });
-
       }
 
+      throw insertError;
+    }
 
-      await pool.query(
-        `
+  } catch (error) {
+    console.error("WALLET REQUEST CREATE ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to submit payment request"
+    });
+  }
+});
+
+/* =========================================
+   CUSTOMER PAYMENT REQUESTS
+========================================= */
+
+app.get("/api/wallet-requests/:customerId", async (req, res) => {
+  try {
+    const customerId = Number(req.params.customerId);
+
+    const result = await pool.query(`
+      SELECT
+        id,
+        customer_id,
+        amount,
+        utr,
+        status,
+        created_at,
+        reviewed_at
+      FROM wallet_requests
+      WHERE customer_id = $1
+      ORDER BY id DESC
+    `, [customerId]);
+
+    res.json({
+      ok: true,
+      requests: result.rows
+    });
+
+  } catch (error) {
+    console.error("CUSTOMER WALLET REQUEST ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to load payment requests"
+    });
+  }
+});
+
+/* =========================================
+   ADMIN - ALL WALLET REQUESTS
+========================================= */
+
+app.get("/api/admin/wallet-requests", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  try {
+    const result = await pool.query(`
+      SELECT
+        wr.id,
+        wr.customer_id,
+        wr.amount,
+        wr.utr,
+        wr.status,
+        wr.created_at,
+        wr.reviewed_at,
+
+        c.name AS customer_name,
+        c.email AS customer_email
+
+      FROM wallet_requests wr
+
+      JOIN customers c
+        ON c.id = wr.customer_id
+
+      ORDER BY
+        CASE
+          WHEN wr.status = 'pending' THEN 0
+          ELSE 1
+        END,
+        wr.id DESC
+    `);
+
+    res.json({
+      ok: true,
+      requests: result.rows
+    });
+
+  } catch (error) {
+    console.error("ADMIN WALLET REQUESTS ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to load payment requests"
+    });
+  }
+});
+
+/* =========================================
+   ADMIN - APPROVE / REJECT PAYMENT
+========================================= */
+
+app.patch("/api/admin/wallet-requests/:id", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  const requestId = Number(req.params.id);
+  const status = String(req.body.status || "").trim().toLowerCase();
+
+  if (!["approved", "rejected"].includes(status)) {
+    return res.status(400).json({
+      ok: false,
+      message: "Status must be approved or rejected"
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    /* =========================================
+       LOCK PAYMENT REQUEST
+    ========================================= */
+
+    const requestResult = await client.query(`
+      SELECT *
+      FROM wallet_requests
+      WHERE id = $1
+      FOR UPDATE
+    `, [requestId]);
+
+    if (!requestResult.rows.length) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        ok: false,
+        message: "Payment request not found"
+      });
+    }
+
+    const request = requestResult.rows[0];
+
+    /* =========================================
+       PREVENT DOUBLE APPROVAL
+    ========================================= */
+
+    if (request.status !== "pending") {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        ok: false,
+        message: `Request already ${request.status}`
+      });
+    }
+
+    /* =========================================
+       REJECT
+    ========================================= */
+
+    if (status === "rejected") {
+
+      const result = await client.query(`
+        UPDATE wallet_requests
+        SET
+          status = 'rejected',
+          reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        RETURNING *
+      `, [requestId]);
+
+      await client.query("COMMIT");
+
+      return res.json({
+        ok: true,
+        message: "Payment request rejected",
+        request: result.rows[0]
+      });
+    }
+
+    /* =========================================
+       APPROVE
+    ========================================= */
+
+    const customerResult = await client.query(`
+      SELECT id
+      FROM customers
+      WHERE id = $1
+      FOR UPDATE
+    `, [request.customer_id]);
+
+    if (!customerResult.rows.length) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        ok: false,
+        message: "Customer not found"
+      });
+    }
+
+    /* =========================================
+       ADD MONEY TO WALLET
+    ========================================= */
+
+    const walletResult = await client.query(`
+      INSERT INTO wallets
+      (
+        customer_id,
+        balance
+      )
+      VALUES
+      ($1,$2)
+
+      ON CONFLICT (customer_id)
+      DO UPDATE SET
+        balance =
+          wallets.balance + EXCLUDED.balance,
+
+        updated_at =
+          CURRENT_TIMESTAMP
+
+      RETURNING *
+    `, [
+      request.customer_id,
+      request.amount
+    ]);
+
+    /* =========================================
+       UPDATE REQUEST
+    ========================================= */
+
+    const updateResult = await client.query(`
+      UPDATE wallet_requests
+      SET
+        status = 'approved',
+        reviewed_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+    `, [requestId]);
+
+    await client.query("COMMIT");
+
+    res.json({
+      ok: true,
+      message: "Payment approved and wallet credited",
+      request: updateResult.rows[0],
+      wallet: walletResult.rows[0]
+    });
+
+  } catch (error) {
+
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) {}
+
+    console.error("PAYMENT REVIEW ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to review payment request"
+    });
+
+  } finally {
+    client.release();
+  }
+});
+
+/* =========================================
+   PURCHASE PRODUCT
+========================================= */
+
+app.post("/api/purchase", async (req, res) => {
+
+  const customerId = Number(req.body.customerId);
+  const productId = Number(req.body.productId);
+  const duration = String(req.body.duration || "").trim();
+
+  if (!customerId || !productId) {
+    return res.status(400).json({
+      ok: false,
+      message: "Customer and product required"
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+
+    await client.query("BEGIN");
+
+    /* =========================================
+       CUSTOMER
+    ========================================= */
+
+    const customerResult = await client.query(`
+      SELECT *
+      FROM customers
+      WHERE id = $1
+    `, [customerId]);
+
+    if (!customerResult.rows.length) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        ok: false,
+        message: "Customer not found"
+      });
+    }
+
+    /* =========================================
+       PRODUCT
+    ========================================= */
+
+    const productResult = await client.query(`
+      SELECT *
+      FROM products
+      WHERE id = $1
+      FOR UPDATE
+    `, [productId]);
+
+    if (!productResult.rows.length) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        ok: false,
+        message: "Product not found"
+      });
+    }
+
+    const product = productResult.rows[0];
+
+    /* =========================================
+       MAINTENANCE
+    ========================================= */
+
+    if (
+      product.maintenance === true ||
+      product.status !== "active"
+    ) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        ok: false,
+        message: "Product is currently unavailable"
+      });
+    }
+
+    /* =========================================
+       PRICE
+    ========================================= */
+
+    let amount = Number(product.price || 0);
+
+    if (
+      product.prices &&
+      typeof product.prices === "object" &&
+      duration &&
+      product.prices[duration] !== undefined
+    ) {
+      amount = Number(product.prices[duration]);
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid product price"
+      });
+    }
+
+    /* =========================================
+       LOCK WALLET
+    ========================================= */
+
+    const walletResult = await client.query(`
+      SELECT *
+      FROM wallets
+      WHERE customer_id = $1
+      FOR UPDATE
+    `, [customerId]);
+
+    if (!walletResult.rows.length) {
+      await client.query(`
         INSERT INTO wallets
         (
           customer_id,
           balance
         )
-
         VALUES
-        (
-          $1,
-          $2
-        )
+        ($1,0)
+        ON CONFLICT (customer_id)
+        DO NOTHING
+      `, [customerId]);
 
-        ON CONFLICT(customer_id)
+      await client.query("ROLLBACK");
 
-        DO UPDATE SET
-
-          balance =
-            wallets.balance +
-            EXCLUDED.balance,
-
-          updated_at =
-            CURRENT_TIMESTAMP
-        `,
-        [
-          customerId,
-          amount
-        ]
-      );
-
-
-      const result =
-        await pool.query(
-          `
-          SELECT balance
-          FROM wallets
-          WHERE customer_id = $1
-          `,
-          [
-            customerId
-          ]
-        );
-
-
-      res.json({
-        ok: true,
-
-        message:
-          "Wallet balance added",
-
-        balance:
-          Number(
-            result.rows[0].balance
-          )
-      });
-
-
-    } catch(error){
-
-      console.error(
-        "ADD WALLET ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
+      return res.status(400).json({
         ok: false,
-        message:
-          "Failed to add wallet balance"
+        message: "Wallet has no balance"
       });
-
     }
 
-  }
-);
+    const wallet = walletResult.rows[0];
 
+    const balance = Number(wallet.balance);
 
-/* =========================================
-   BUY PRODUCT
-========================================= */
+    if (balance < amount) {
+      await client.query("ROLLBACK");
 
-app.post(
-  "/api/purchase",
-  async (req, res) => {
+      return res.status(400).json({
+        ok: false,
+        message: "Insufficient wallet balance"
+      });
+    }
 
-    const client =
-      await pool.connect();
+    /* =========================================
+       DEDUCT WALLET
+    ========================================= */
 
+    const newBalance = balance - amount;
+
+    await client.query(`
+      UPDATE wallets
+      SET
+        balance = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE customer_id = $2
+    `, [
+      newBalance,
+      customerId
+    ]);
+
+    /* =========================================
+       CREATE ORDER
+    ========================================= */
+
+    const orderResult = await client.query(`
+      INSERT INTO orders
+      (
+        customer_id,
+        product_id,
+        product_name,
+        duration,
+        amount,
+        status
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,'completed')
+
+      RETURNING *
+    `, [
+      customerId,
+      product.id,
+      product.name,
+      duration,
+      amount
+    ]);
+
+    await client.query("COMMIT");
+
+    res.json({
+      ok: true,
+      message: "Purchase successful",
+      order: orderResult.rows[0],
+      balance: newBalance
+    });
+
+  } catch (error) {
 
     try {
-
-      const {
-        customerId,
-        productId,
-        duration
-      } = req.body;
-
-
-      const customerID =
-        Number(customerId);
-
-      const productID =
-        Number(productId);
-
-
-      if(
-        !Number.isInteger(customerID) ||
-        !Number.isInteger(productID) ||
-        !duration
-      ){
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "customerId, productId and duration are required"
-        });
-
-      }
-
-
-      await client.query(
-        "BEGIN"
-      );
-
-
-      /*
-        Check customer.
-      */
-
-      const customerResult =
-        await client.query(
-          `
-          SELECT id
-          FROM customers
-          WHERE id = $1
-          `,
-          [
-            customerID
-          ]
-        );
-
-
-      if(!customerResult.rows.length){
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Customer not found"
-        });
-
-      }
-
-
-      /*
-        Lock product row.
-        This prevents buying while its
-        maintenance state is being changed.
-      */
-
-      const productResult =
-        await client.query(
-          `
-          SELECT *
-          FROM products
-          WHERE id = $1
-          FOR UPDATE
-          `,
-          [
-            productID
-          ]
-        );
-
-
-      if(!productResult.rows.length){
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Product not found"
-        });
-
-      }
-
-
-      const product =
-        productResult.rows[0];
-
-
-      /*
-        Maintenance protection.
-      */
-
-      if(
-        product.maintenance === true ||
-        String(product.status || "")
-          .toLowerCase()
-          .includes("maintenance")
-      ){
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(409).json({
-          ok: false,
-          message:
-            "Product is currently under maintenance"
-        });
-
-      }
-
-
-      /*
-        Read selected duration price.
-      */
-
-      let prices =
-        product.prices;
-
-
-      if(
-        !prices ||
-        typeof prices !== "object"
-      ){
-
-        prices = {};
-
-      }
-
-
-      let amount;
-
-
-      if(
-        Object.prototype.hasOwnProperty.call(
-          prices,
-          duration
-        )
-      ){
-
-        amount =
-          Number(
-            prices[duration]
-          );
-
-      }else{
-
-        /*
-          Backward compatibility:
-          old products may only have
-          price + duration.
-        */
-
-        if(
-          String(product.duration || "") ===
-          String(duration)
-        ){
-
-          amount =
-            Number(
-              product.price || 0
-            );
-
-        }else{
-
-          await client.query(
-            "ROLLBACK"
-          );
-
-          return res.status(400).json({
-            ok: false,
-            message:
-              "Selected duration is not available"
-          });
-
-        }
-
-      }
-
-
-      if(
-        !isFinite(amount) ||
-        amount <= 0
-      ){
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Invalid product price"
-        });
-
-      }
-
-
-      /*
-        Lock wallet.
-      */
-
-      const walletResult =
-        await client.query(
-          `
-          SELECT *
-          FROM wallets
-
-          WHERE customer_id = $1
-
-          FOR UPDATE
-          `,
-          [
-            customerID
-          ]
-        );
-
-
-      if(!walletResult.rows.length){
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Wallet not found"
-        });
-
-      }
-
-
-      const currentBalance =
-        Number(
-          walletResult.rows[0].balance
-        );
-
-
-      /*
-        Insufficient balance.
-      */
-
-      if(currentBalance < amount){
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(400).json({
-          ok: false,
-
-          message:
-            "Insufficient wallet balance",
-
-          balance:
-            currentBalance,
-
-          required:
-            amount
-        });
-
-      }
-
-
-      /*
-        Deduct balance.
-      */
-
-      const newBalance =
-        currentBalance - amount;
-
-
-      await client.query(
-        `
-        UPDATE wallets
-
-        SET
-          balance = $1,
-          updated_at = CURRENT_TIMESTAMP
-
-        WHERE customer_id = $2
-        `,
-        [
-          newBalance,
-          customerID
-        ]
-      );
-
-
-      /*
-        Create order.
-      */
-
-      const orderResult =
-        await client.query(
-          `
-          INSERT INTO orders
-          (
-            customer_id,
-            product_id,
-            product_name,
-            pid,
-            duration,
-            amount,
-            status
-          )
-
-          VALUES
-          (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            $6,
-            'completed'
-          )
-
-          RETURNING *
-          `,
-          [
-            customerID,
-            productID,
-            product.name,
-            product.pid || "",
-            duration,
-            amount
-          ]
-        );
-
-
-      /*
-        Everything succeeded.
-      */
-
-      await client.query(
-        "COMMIT"
-      );
-
-
-      res.json({
-        ok: true,
-
-        message:
-          "Purchase successful",
-
-        balance:
-          Number(
-            newBalance.toFixed(2)
+      await client.query("ROLLBACK");
+    } catch (_) {}
+
+    console.error("PURCHASE ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Purchase failed"
+    });
+
+  } finally {
+    client.release();
+  }
+});
+
+/* =========================================
+   CUSTOMER ORDERS
+========================================= */
+
+app.get("/api/orders/:customerId", async (req, res) => {
+  try {
+    const customerId = Number(req.params.customerId);
+
+    const result = await pool.query(`
+      SELECT *
+      FROM orders
+      WHERE customer_id = $1
+      ORDER BY id DESC
+    `, [customerId]);
+
+    res.json({
+      ok: true,
+      orders: result.rows
+    });
+
+  } catch (error) {
+    console.error("ORDERS GET ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to load orders"
+    });
+  }
+});
+
+/* =========================================
+   ADMIN CUSTOMERS
+========================================= */
+
+app.get("/api/admin/customers", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  try {
+
+    const result = await pool.query(`
+      SELECT
+        c.id,
+        c.name,
+        c.email,
+        c.created_at,
+
+        COALESCE(w.balance,0) AS balance,
+
+        COUNT(o.id)::INTEGER AS purchases,
+
+        COALESCE(
+          SUM(
+            CASE
+              WHEN o.status = 'completed'
+              THEN o.amount
+              ELSE 0
+            END
           ),
+          0
+        ) AS spent
 
-        order:
-          orderResult.rows[0]
-      });
+      FROM customers c
 
+      LEFT JOIN wallets w
+        ON w.customer_id = c.id
 
-    } catch(error){
+      LEFT JOIN orders o
+        ON o.customer_id = c.id
 
-      try {
+      GROUP BY
+        c.id,
+        c.name,
+        c.email,
+        c.created_at,
+        w.balance
 
-        await client.query(
-          "ROLLBACK"
-        );
-
-      } catch(rollbackError) {
-
-        console.error(
-          "ROLLBACK ERROR:",
-          rollbackError
-        );
-
-      }
-
-
-      console.error(
-        "PURCHASE ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
-        ok: false,
-        message:
-          "Purchase failed"
-      });
-
-
-    } finally {
-
-      client.release();
-
-    }
-
-  }
-);
-
-
-/* =========================================
-   GET CUSTOMER ORDERS
-========================================= */
-
-app.get(
-  "/api/orders/:customerId",
-  async (req, res) => {
-
-    try {
-
-      const customerId =
-        Number(
-          req.params.customerId
-        );
-
-
-      if(!Number.isInteger(customerId)){
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Invalid customer ID"
-        });
-
-      }
-
-
-      const result =
-        await pool.query(
-          `
-          SELECT
-            id,
-            customer_id,
-            product_id,
-            product_name,
-            pid,
-            duration,
-            amount,
-            status,
-            created_at
-
-          FROM orders
-
-          WHERE customer_id = $1
-
-          ORDER BY id DESC
-          `,
-          [
-            customerId
-          ]
-        );
-
-
-      res.json({
-        ok: true,
-        orders:
-          result.rows
-      });
-
-
-    } catch(error){
-
-      console.error(
-        "GET ORDERS ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
-        ok: false,
-        message:
-          "Failed to get orders"
-      });
-
-    }
-
-  }
-);
-
-
-/* =========================================
-   ADMIN - ALL CUSTOMERS
-========================================= */
-
-app.get(
-  "/api/admin/customers",
-  async (req, res) => {
-
-    try {
-
-      if (!checkAdmin(req, res))
-        return;
-
-
-      const result =
-        await pool.query(
-          `
-          SELECT
-
-            c.id,
-            c.name,
-            c.email,
-            c.created_at,
-
-            COALESCE(
-              w.balance,
-              0
-            ) AS balance,
-
-            COUNT(o.id)
-              AS total_orders,
-
-            COALESCE(
-              SUM(o.amount),
-              0
-            ) AS total_spent
-
-          FROM customers c
-
-          LEFT JOIN wallets w
-            ON w.customer_id = c.id
-
-          LEFT JOIN orders o
-            ON o.customer_id = c.id
-
-          GROUP BY
-            c.id,
-            w.balance
-
-          ORDER BY c.id DESC
-          `
-        );
-
-
-      res.json({
-        ok: true,
-        customers:
-          result.rows
-      });
-
-
-    } catch(error){
-
-      console.error(
-        "ADMIN CUSTOMERS ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
-        ok: false,
-        message:
-          "Failed to load customers"
-      });
-
-    }
-
-  }
-);
-
-
-/* =========================================
-   ADMIN - ALL ORDERS
-========================================= */
-
-app.get(
-  "/api/admin/orders",
-  async (req, res) => {
-
-    try {
-
-      if (!checkAdmin(req, res))
-        return;
-
-
-      const result =
-        await pool.query(
-          `
-          SELECT
-
-            o.*,
-
-            c.name AS customer_name,
-            c.email AS customer_email
-
-          FROM orders o
-
-          LEFT JOIN customers c
-            ON c.id = o.customer_id
-
-          ORDER BY o.id DESC
-          `
-        );
-
-
-      res.json({
-        ok: true,
-        orders:
-          result.rows
-      });
-
-
-    } catch(error){
-
-      console.error(
-        "ADMIN ORDERS ERROR:",
-        error
-      );
-
-
-      res.status(500).json({
-        ok: false,
-        message:
-          "Failed to load orders"
-      });
-
-    }
-
-  }
-);
-
-
-/* =========================================
-   OLD WALLET API
-========================================= */
-
-app.get(
-  "/api/wallet",
-  (req, res) => {
+      ORDER BY c.id DESC
+    `);
 
     res.json({
       ok: true,
-      balance: 0,
-
-      message:
-        "Use /api/wallet/:customerId"
+      customers: result.rows
     });
 
-  }
-);
+  } catch (error) {
+    console.error("ADMIN CUSTOMERS ERROR:", error);
 
+    res.status(500).json({
+      ok: false,
+      message: "Failed to load customers"
+    });
+  }
+});
 
 /* =========================================
-   OLD ORDERS API
+   ADMIN ORDERS
 ========================================= */
 
-app.get(
-  "/api/orders",
-  (req, res) => {
+app.get("/api/admin/orders", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  try {
+
+    const result = await pool.query(`
+      SELECT
+        o.*,
+        c.name AS customer_name,
+        c.email AS customer_email,
+        p.name AS product_name_db
+
+      FROM orders o
+
+      JOIN customers c
+        ON c.id = o.customer_id
+
+      LEFT JOIN products p
+        ON p.id = o.product_id
+
+      ORDER BY o.id DESC
+    `);
 
     res.json({
       ok: true,
-      orders: [],
-
-      message:
-        "Use /api/orders/:customerId"
+      orders: result.rows
     });
 
-  }
-);
+  } catch (error) {
+    console.error("ADMIN ORDERS ERROR:", error);
 
+    res.status(500).json({
+      ok: false,
+      message: "Failed to load orders"
+    });
+  }
+});
+
+/* =========================================
+   ADMIN STATS
+========================================= */
+
+app.get("/api/admin/stats", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+
+  try {
+
+    const usersResult = await pool.query(`
+      SELECT COUNT(*)::INTEGER AS count
+      FROM customers
+    `);
+
+    const ordersResult = await pool.query(`
+      SELECT COUNT(*)::INTEGER AS count
+      FROM orders
+      WHERE status = 'completed'
+    `);
+
+    const salesResult = await pool.query(`
+      SELECT COALESCE(SUM(amount),0) AS total
+      FROM orders
+      WHERE status = 'completed'
+    `);
+
+    const pendingResult = await pool.query(`
+      SELECT COUNT(*)::INTEGER AS count
+      FROM wallet_requests
+      WHERE status = 'pending'
+    `);
+
+    res.json({
+      ok: true,
+
+      users: usersResult.rows[0].count,
+
+      orders: ordersResult.rows[0].count,
+
+      sales: Number(
+        salesResult.rows[0].total || 0
+      ),
+
+      pendingPayments:
+        pendingResult.rows[0].count
+    });
+
+  } catch (error) {
+
+    console.error("ADMIN STATS ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to load stats"
+    });
+  }
+});
+
+/* =========================================
+   LEGACY WALLET
+========================================= */
+
+app.get("/api/wallet", async (req, res) => {
+  res.json({
+    ok: false,
+    message: "Use /api/wallet/:customerId"
+  });
+});
+
+/* =========================================
+   LEGACY ORDERS
+========================================= */
+
+app.get("/api/orders", async (req, res) => {
+  res.json({
+    ok: false,
+    message: "Use /api/orders/:customerId"
+  });
+});
 
 /* =========================================
    404
 ========================================= */
 
-app.use(
-  (req, res) => {
-
-    res.status(404).json({
-      ok: false,
-      message: "API route not found"
-    });
-
-  }
-);
-
+app.use((req, res) => {
+  res.status(404).json({
+    ok: false,
+    message: "Route not found"
+  });
+});
 
 /* =========================================
    GLOBAL ERROR
 ========================================= */
 
-app.use(
-  (error, req, res, next) => {
+app.use((error, req, res, next) => {
 
-    console.error(
-      "GLOBAL ERROR:",
-      error
-    );
+  console.error("GLOBAL ERROR:", error);
 
-
-    res.status(500).json({
-      ok: false,
-      message:
-        "Internal server error"
-    });
-
-  }
-);
-
+  res.status(500).json({
+    ok: false,
+    message: "Internal server error"
+  });
+});
 
 /* =========================================
-   SERVER
+   START SERVER
 ========================================= */
 
-const PORT =
-  process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
-
-app.listen(
-  PORT,
-  () => {
-
-    console.log(
-      `Server running on port ${PORT}`
-    );
-
-  }
-);
+app.listen(PORT, () => {
+  console.log(`
+=========================================
+ NEXUS STORE BACKEND
+ PORT: ${PORT}
+=========================================
+`);
+});
