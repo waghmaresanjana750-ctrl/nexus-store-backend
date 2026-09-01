@@ -1,14 +1,13 @@
 {
   "name": "nexus-store-backend",
   "version": "1.0.0",
-  "description": "Nexus Store backend API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-  "express": "...",
-  "pg": "...",
-  "cors": "^2.8.5"
-}
+    "express": "^4.21.2",
+    "pg": "^8.13.1",
+    "cors": "^2.8.5"
   }
+}
