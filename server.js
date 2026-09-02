@@ -24,11 +24,6 @@ const pool = new Pool({
 
 async function setupDatabase() {
   try {
-
-    /* =========================================
-       CREATE TABLES
-    ========================================= */
-
     await pool.query(`
       CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
@@ -79,16 +74,12 @@ async function setupDatabase() {
 
       CREATE TABLE IF NOT EXISTS wallet_requests (
         id SERIAL PRIMARY KEY,
-
         customer_id INTEGER NOT NULL
           REFERENCES customers(id)
           ON DELETE CASCADE,
-
         amount NUMERIC(12,2) NOT NULL
           CHECK (amount > 0),
-
         utr TEXT NOT NULL,
-
         status TEXT NOT NULL DEFAULT 'pending'
           CHECK (
             status IN (
@@ -97,17 +88,10 @@ async function setupDatabase() {
               'rejected'
             )
           ),
-
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
         reviewed_at TIMESTAMP
       );
     `);
-
-    /* =========================================
-       OLD DATABASE FIXES
-       IMPORTANT
-    ========================================= */
 
     await pool.query(`
       ALTER TABLE wallets
@@ -149,11 +133,27 @@ async function setupDatabase() {
       ALTER TABLE products
       ADD COLUMN IF NOT EXISTS status
       TEXT DEFAULT 'active';
-    `);
 
-    /* =========================================
-       UNIQUE INDEXES
-    ========================================= */
+      ALTER TABLE orders
+      ADD COLUMN IF NOT EXISTS product_name
+      TEXT DEFAULT '';
+
+      ALTER TABLE orders
+      ADD COLUMN IF NOT EXISTS duration
+      TEXT DEFAULT '';
+
+      ALTER TABLE orders
+      ADD COLUMN IF NOT EXISTS amount
+      NUMERIC(12,2) DEFAULT 0;
+
+      ALTER TABLE orders
+      ADD COLUMN IF NOT EXISTS status
+      TEXT DEFAULT 'completed';
+
+      ALTER TABLE wallet_requests
+      ADD COLUMN IF NOT EXISTS reviewed_at
+      TIMESTAMP;
+    `);
 
     await pool.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS
@@ -170,35 +170,22 @@ async function setupDatabase() {
     console.log("DATABASE SETUP COMPLETE");
 
   } catch (error) {
-
-    console.error(
-      "DATABASE SETUP ERROR:",
-      error
-    );
+    console.error("DATABASE SETUP ERROR:", error);
   }
 }
-
-/* =========================================
-   START DATABASE SETUP
-========================================= */
-
-setupDatabase();
 
 /* =========================================
    ADMIN AUTH
 ========================================= */
 
 function checkAdmin(req, res) {
-
-  const adminKey =
-    req.headers["x-admin-key"];
+  const adminKey = req.headers["x-admin-key"];
 
   if (
     !adminKey ||
     !process.env.ADMIN_KEY ||
     adminKey !== process.env.ADMIN_KEY
   ) {
-
     res.status(401).json({
       ok: false,
       message: "Unauthorized"
@@ -215,7 +202,6 @@ function checkAdmin(req, res) {
 ========================================= */
 
 app.get("/", (req, res) => {
-
   res.json({
     ok: true,
     message: "NEXUS STORE BACKEND RUNNING"
@@ -223,17 +209,14 @@ app.get("/", (req, res) => {
 });
 
 /* =========================================
-   DB TEST
+   DATABASE TEST
 ========================================= */
 
 app.get("/api/db-test", async (req, res) => {
-
   try {
-
-    const result =
-      await pool.query(`
-        SELECT NOW() AS time
-      `);
+    const result = await pool.query(`
+      SELECT NOW() AS time
+    `);
 
     res.json({
       ok: true,
@@ -242,11 +225,7 @@ app.get("/api/db-test", async (req, res) => {
     });
 
   } catch (error) {
-
-    console.error(
-      "DB TEST ERROR:",
-      error
-    );
+    console.error("DB TEST ERROR:", error);
 
     res.status(500).json({
       ok: false,
@@ -260,15 +239,12 @@ app.get("/api/db-test", async (req, res) => {
 ========================================= */
 
 app.get("/api/products", async (req, res) => {
-
   try {
-
-    const result =
-      await pool.query(`
-        SELECT *
-        FROM products
-        ORDER BY id DESC
-      `);
+    const result = await pool.query(`
+      SELECT *
+      FROM products
+      ORDER BY id DESC
+    `);
 
     res.json({
       ok: true,
@@ -276,11 +252,7 @@ app.get("/api/products", async (req, res) => {
     });
 
   } catch (error) {
-
-    console.error(
-      "PRODUCT GET ERROR:",
-      error
-    );
+    console.error("PRODUCT GET ERROR:", error);
 
     res.status(500).json({
       ok: false,
@@ -290,15 +262,13 @@ app.get("/api/products", async (req, res) => {
 });
 
 /* =========================================
-   PRODUCTS - ADMIN ADD
+   PRODUCT - ADMIN ADD
 ========================================= */
 
 app.post("/api/products", async (req, res) => {
-
   if (!checkAdmin(req, res)) return;
 
   try {
-
     const {
       name,
       description = "",
@@ -312,140 +282,18 @@ app.post("/api/products", async (req, res) => {
       status = "active"
     } = req.body;
 
-    if (
-      !name ||
-      !String(name).trim()
-    ) {
+    const cleanName = String(name || "").trim();
 
+    if (!cleanName) {
       return res.status(400).json({
         ok: false,
         message: "Product name required"
       });
     }
 
-    const result =
-      await pool.query(`
-        INSERT INTO products
-        (
-          name,
-          description,
-          price,
-          duration,
-          prices,
-          video,
-          pid,
-          category,
-          maintenance,
-          status
-        )
-        VALUES
-        ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-        RETURNING *
-      `, [
-        String(name).trim(),
-        description,
-        Number(price) || 0,
-        duration,
-        prices,
-        video,
-        pid,
-        category,
-        Boolean(maintenance),
-        status
-      ]);
-
-    res.json({
-      ok: true,
-      product: result.rows[0]
-    });
-
-  } catch (error) {
-
-    console.error(
-      "PRODUCT CREATE ERROR:",
-      error
-    );
-
-    res.status(500).json({
-      ok: false,
-      message: "Failed to create product"
-    });
-  }
-});
-
-/* =========================================
-   PRODUCT MAINTENANCE
-========================================= */
-
-app.patch(
-  "/api/products/:id/maintenance",
-  async (req, res) => {
-
-    if (!checkAdmin(req, res)) return;
-
-    try {
-
-      const id =
-        Number(req.params.id);
-
-      const maintenance =
-        Boolean(req.body.maintenance);
-
-      const result =
-        await pool.query(`
-          UPDATE products
-          SET maintenance = $1
-          WHERE id = $2
-          RETURNING *
-        `, [
-          maintenance,
-          id
-        ]);
-
-      if (!result.rows.length) {
-
-        return res.status(404).json({
-          ok: false,
-          message: "Product not found"
-        });
-      }
-
-      res.json({
-        ok: true,
-        product: result.rows[0]
-      });
-
-    } catch (error) {
-
-      console.error(
-        "MAINTENANCE ERROR:",
-        error
-      );
-
-      res.status(500).json({
-        ok: false,
-        message: "Failed to update maintenance"
-      });
-    }
-  }
-);
-
-/* =========================================
-   PRODUCT UPDATE
-========================================= */
-
-app.patch(
-  "/api/products/:id",
-  async (req, res) => {
-
-    if (!checkAdmin(req, res)) return;
-
-    try {
-
-      const id =
-        Number(req.params.id);
-
-      const {
+    const result = await pool.query(`
+      INSERT INTO products
+      (
         name,
         description,
         price,
@@ -456,63 +304,144 @@ app.patch(
         category,
         maintenance,
         status
-      } = req.body;
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *
+    `, [
+      cleanName,
+      String(description || ""),
+      Number(price) || 0,
+      String(duration || ""),
+      prices || {},
+      String(video || ""),
+      String(pid || ""),
+      String(category || ""),
+      Boolean(maintenance),
+      String(status || "active")
+    ]);
 
-      const result =
-        await pool.query(`
-          UPDATE products
-          SET
-            name =
-              COALESCE($1, name),
+    res.json({
+      ok: true,
+      product: result.rows[0]
+    });
 
-            description =
-              COALESCE($2, description),
+  } catch (error) {
+    console.error("PRODUCT CREATE ERROR:", error);
 
-            price =
-              COALESCE($3, price),
+    res.status(500).json({
+      ok: false,
+      message: "Failed to create product"
+    });
+  }
+});
 
-            duration =
-              COALESCE($4, duration),
+/* =========================================
+   PRODUCT - UPDATE
+========================================= */
 
-            prices =
-              COALESCE($5, prices),
+app.patch("/api/products/:id", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
 
-            video =
-              COALESCE($6, video),
+  try {
+    const id = Number(req.params.id);
 
-            pid =
-              COALESCE($7, pid),
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid product ID"
+      });
+    }
 
-            category =
-              COALESCE($8, category),
+    const {
+      name,
+      description,
+      price,
+      duration,
+      prices,
+      video,
+      pid,
+      category,
+      maintenance,
+      status
+    } = req.body;
 
-            maintenance =
-              COALESCE($9, maintenance),
+    const result = await pool.query(`
+      UPDATE products
+      SET
+        name = COALESCE($1, name),
+        description = COALESCE($2, description),
+        price = COALESCE($3, price),
+        duration = COALESCE($4, duration),
+        prices = COALESCE($5, prices),
+        video = COALESCE($6, video),
+        pid = COALESCE($7, pid),
+        category = COALESCE($8, category),
+        maintenance = COALESCE($9, maintenance),
+        status = COALESCE($10, status)
+      WHERE id = $11
+      RETURNING *
+    `, [
+      name,
+      description,
+      price === undefined ? null : Number(price),
+      duration,
+      prices,
+      video,
+      pid,
+      category,
+      maintenance,
+      status,
+      id
+    ]);
 
-            status =
-              COALESCE($10, status)
+    if (!result.rows.length) {
+      return res.status(404).json({
+        ok: false,
+        message: "Product not found"
+      });
+    }
 
-          WHERE id = $11
+    res.json({
+      ok: true,
+      product: result.rows[0]
+    });
 
-          RETURNING *
-        `, [
-          name,
-          description,
-          price === undefined
-            ? null
-            : Number(price),
-          duration,
-          prices,
-          video,
-          pid,
-          category,
-          maintenance,
-          status,
-          id
-        ]);
+  } catch (error) {
+    console.error("PRODUCT UPDATE ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to update product"
+    });
+  }
+});
+
+/* =========================================
+   PRODUCT - MAINTENANCE
+========================================= */
+
+app.patch(
+  "/api/products/:id/maintenance",
+  async (req, res) => {
+
+    if (!checkAdmin(req, res)) return;
+
+    try {
+      const id = Number(req.params.id);
+      const maintenance = Boolean(req.body.maintenance);
+
+      const result = await pool.query(`
+        UPDATE products
+        SET maintenance = $1
+        WHERE id = $2
+        RETURNING *
+      `, [
+        maintenance,
+        id
+      ]);
 
       if (!result.rows.length) {
-
         return res.status(404).json({
           ok: false,
           message: "Product not found"
@@ -525,292 +454,207 @@ app.patch(
       });
 
     } catch (error) {
-
-      console.error(
-        "PRODUCT UPDATE ERROR:",
-        error
-      );
+      console.error("MAINTENANCE ERROR:", error);
 
       res.status(500).json({
         ok: false,
-        message: "Failed to update product"
+        message: "Failed to update maintenance"
       });
     }
   }
 );
 
 /* =========================================
-   PRODUCT DELETE
+   PRODUCT - DELETE
 ========================================= */
 
-app.delete(
-  "/api/products/:id",
-  async (req, res) => {
+app.delete("/api/products/:id", async (req, res) => {
+  if (!checkAdmin(req, res)) return;
 
-    if (!checkAdmin(req, res)) return;
+  try {
+    const id = Number(req.params.id);
 
-    try {
+    const result = await pool.query(`
+      DELETE FROM products
+      WHERE id = $1
+      RETURNING *
+    `, [id]);
 
-      const id =
-        Number(req.params.id);
-
-      const result =
-        await pool.query(`
-          DELETE FROM products
-          WHERE id = $1
-          RETURNING *
-        `, [id]);
-
-      if (!result.rows.length) {
-
-        return res.status(404).json({
-          ok: false,
-          message: "Product not found"
-        });
-      }
-
-      res.json({
-        ok: true,
-        message: "Product deleted"
-      });
-
-    } catch (error) {
-
-      console.error(
-        "PRODUCT DELETE ERROR:",
-        error
-      );
-
-      res.status(500).json({
+    if (!result.rows.length) {
+      return res.status(404).json({
         ok: false,
-        message: "Failed to delete product"
+        message: "Product not found"
       });
     }
+
+    res.json({
+      ok: true,
+      message: "Product deleted"
+    });
+
+  } catch (error) {
+    console.error("PRODUCT DELETE ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to delete product"
+    });
   }
-);
+});
 
 /* =========================================
    CUSTOMER CREATE / UPDATE
 ========================================= */
 
-app.post(
-  "/api/customers",
-  async (req, res) => {
+app.post("/api/customers", async (req, res) => {
+  try {
+    const cleanName =
+      String(req.body.name || "").trim();
 
-    try {
+    const cleanEmail =
+      String(req.body.email || "")
+        .trim()
+        .toLowerCase();
 
-      const {
-        name,
-        email
-      } = req.body;
-
-      const cleanName =
-        String(name || "").trim();
-
-      const cleanEmail =
-        String(email || "")
-          .trim()
-          .toLowerCase();
-
-      if (
-        !cleanName ||
-        !cleanEmail
-      ) {
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Name and email required"
-        });
-      }
-
-      const customerResult =
-        await pool.query(`
-          INSERT INTO customers
-          (
-            name,
-            email
-          )
-          VALUES
-          ($1,$2)
-
-          ON CONFLICT (email)
-          DO UPDATE SET
-            name = EXCLUDED.name
-
-          RETURNING *
-        `, [
-          cleanName,
-          cleanEmail
-        ]);
-
-      const customer =
-        customerResult.rows[0];
-
-      const walletResult =
-        await pool.query(`
-          INSERT INTO wallets
-          (
-            customer_id,
-            balance
-          )
-          VALUES
-          ($1,0)
-
-          ON CONFLICT (customer_id)
-          DO UPDATE SET
-            updated_at =
-              CURRENT_TIMESTAMP
-
-          RETURNING *
-        `, [
-          customer.id
-        ]);
-
-      res.json({
-        ok: true,
-        customer,
-        wallet:
-          walletResult.rows[0]
-      });
-
-    } catch (error) {
-
-      console.error(
-        "CUSTOMER CREATE ERROR:",
-        error
-      );
-
-      res.status(500).json({
+    if (!cleanName || !cleanEmail) {
+      return res.status(400).json({
         ok: false,
-        message:
-          "Failed to create customer"
+        message: "Name and email required"
       });
     }
+
+    const customerResult = await pool.query(`
+      INSERT INTO customers
+      (
+        name,
+        email
+      )
+      VALUES
+      ($1,$2)
+      ON CONFLICT (email)
+      DO UPDATE SET
+        name = EXCLUDED.name
+      RETURNING *
+    `, [
+      cleanName,
+      cleanEmail
+    ]);
+
+    const customer = customerResult.rows[0];
+
+    const walletResult = await pool.query(`
+      INSERT INTO wallets
+      (
+        customer_id,
+        balance
+      )
+      VALUES
+      ($1,0)
+      ON CONFLICT (customer_id)
+      DO UPDATE SET
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `, [
+      customer.id
+    ]);
+
+    res.json({
+      ok: true,
+      customer,
+      wallet: walletResult.rows[0]
+    });
+
+  } catch (error) {
+    console.error("CUSTOMER CREATE ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to create customer"
+    });
   }
-);
+});
 
 /* =========================================
    CUSTOMER GET
 ========================================= */
 
-app.get(
-  "/api/customers/:id",
-  async (req, res) => {
+app.get("/api/customers/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
 
-    try {
+    const result = await pool.query(`
+      SELECT
+        c.*,
+        COALESCE(w.balance, 0) AS balance
+      FROM customers c
+      LEFT JOIN wallets w
+        ON w.customer_id = c.id
+      WHERE c.id = $1
+    `, [id]);
 
-      const id =
-        Number(req.params.id);
-
-      const result =
-        await pool.query(`
-          SELECT
-            c.*,
-
-            COALESCE(
-              w.balance,
-              0
-            ) AS balance
-
-          FROM customers c
-
-          LEFT JOIN wallets w
-            ON w.customer_id = c.id
-
-          WHERE c.id = $1
-        `, [id]);
-
-      if (!result.rows.length) {
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Customer not found"
-        });
-      }
-
-      res.json({
-        ok: true,
-        customer:
-          result.rows[0]
-      });
-
-    } catch (error) {
-
-      console.error(
-        "CUSTOMER GET ERROR:",
-        error
-      );
-
-      res.status(500).json({
+    if (!result.rows.length) {
+      return res.status(404).json({
         ok: false,
-        message:
-          "Failed to load customer"
+        message: "Customer not found"
       });
     }
+
+    res.json({
+      ok: true,
+      customer: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error("CUSTOMER GET ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to load customer"
+    });
   }
-);
+});
 
 /* =========================================
    WALLET GET
 ========================================= */
 
-app.get(
-  "/api/wallet/:customerId",
-  async (req, res) => {
+app.get("/api/wallet/:customerId", async (req, res) => {
+  try {
+    const customerId =
+      Number(req.params.customerId);
 
-    try {
+    const result = await pool.query(`
+      SELECT
+        customer_id,
+        balance,
+        updated_at
+      FROM wallets
+      WHERE customer_id = $1
+    `, [customerId]);
 
-      const customerId =
-        Number(req.params.customerId);
-
-      const result =
-        await pool.query(`
-          SELECT
-            customer_id,
-            balance,
-            updated_at
-
-          FROM wallets
-
-          WHERE customer_id = $1
-        `, [customerId]);
-
-      if (!result.rows.length) {
-
-        return res.json({
-          ok: true,
-          customerId,
-          balance: 0
-        });
-      }
-
-      res.json({
+    if (!result.rows.length) {
+      return res.json({
         ok: true,
-        wallet:
-          result.rows[0],
-        balance:
-          Number(
-            result.rows[0].balance
-          )
-      });
-
-    } catch (error) {
-
-      console.error(
-        "WALLET GET ERROR:",
-        error
-      );
-
-      res.status(500).json({
-        ok: false,
-        message:
-          "Failed to load wallet"
+        customerId,
+        balance: 0
       });
     }
+
+    res.json({
+      ok: true,
+      wallet: result.rows[0],
+      balance: Number(result.rows[0].balance)
+    });
+
+  } catch (error) {
+    console.error("WALLET GET ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to load wallet"
+    });
   }
-);
+});
 
 /* =========================================
    ADMIN ADD WALLET BALANCE
@@ -823,7 +667,6 @@ app.post(
     if (!checkAdmin(req, res)) return;
 
     try {
-
       const customerId =
         Number(req.params.customerId);
 
@@ -834,11 +677,9 @@ app.post(
         !Number.isFinite(amount) ||
         amount <= 0
       ) {
-
         return res.status(400).json({
           ok: false,
-          message:
-            "Invalid amount"
+          message: "Invalid amount"
         });
       }
 
@@ -850,11 +691,9 @@ app.post(
         `, [customerId]);
 
       if (!customer.rows.length) {
-
         return res.status(404).json({
           ok: false,
-          message:
-            "Customer not found"
+          message: "Customer not found"
         });
       }
 
@@ -870,7 +709,6 @@ app.post(
 
           ON CONFLICT (customer_id)
           DO UPDATE SET
-
             balance =
               wallets.balance +
               EXCLUDED.balance,
@@ -886,21 +724,15 @@ app.post(
 
       res.json({
         ok: true,
-        wallet:
-          result.rows[0]
+        wallet: result.rows[0]
       });
 
     } catch (error) {
-
-      console.error(
-        "ADMIN WALLET ADD ERROR:",
-        error
-      );
+      console.error("ADMIN WALLET ADD ERROR:", error);
 
       res.status(500).json({
         ok: false,
-        message:
-          "Failed to add wallet balance"
+        message: "Failed to add wallet balance"
       });
     }
   }
@@ -910,142 +742,114 @@ app.post(
    CREATE WALLET PAYMENT REQUEST
 ========================================= */
 
-app.post(
-  "/api/wallet-requests",
-  async (req, res) => {
+app.post("/api/wallet-requests", async (req, res) => {
+  try {
+    const customerId =
+      Number(req.body.customerId);
 
-    try {
+    const amount =
+      Number(req.body.amount);
 
-      const customerId =
-        Number(req.body.customerId);
+    const utr =
+      String(req.body.utr || "").trim();
 
-      const amount =
-        Number(req.body.amount);
-
-      const utr =
-        String(
-          req.body.utr || ""
-        ).trim();
-
-      if (!customerId) {
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Customer ID required"
-        });
-      }
-
-      if (
-        !Number.isFinite(amount) ||
-        amount <= 0
-      ) {
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Invalid amount"
-        });
-      }
-
-      if (amount > 1000000) {
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Amount too large"
-        });
-      }
-
-      if (
-        !utr ||
-        utr.length < 4 ||
-        utr.length > 100
-      ) {
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Valid UTR required"
-        });
-      }
-
-      const customerResult =
-        await pool.query(`
-          SELECT id
-          FROM customers
-          WHERE id = $1
-        `, [customerId]);
-
-      if (!customerResult.rows.length) {
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Customer not found"
-        });
-      }
-
-      try {
-
-        const result =
-          await pool.query(`
-            INSERT INTO wallet_requests
-            (
-              customer_id,
-              amount,
-              utr
-            )
-            VALUES
-            ($1,$2,$3)
-
-            RETURNING *
-          `, [
-            customerId,
-            amount,
-            utr
-          ]);
-
-        res.json({
-          ok: true,
-          message:
-            "Payment request submitted",
-          request:
-            result.rows[0]
-        });
-
-      } catch (insertError) {
-
-        if (
-          insertError.code ===
-          "23505"
-        ) {
-
-          return res.status(409).json({
-            ok: false,
-            message:
-              "This UTR has already been submitted"
-          });
-        }
-
-        throw insertError;
-      }
-
-    } catch (error) {
-
-      console.error(
-        "WALLET REQUEST CREATE ERROR:",
-        error
-      );
-
-      res.status(500).json({
+    if (!customerId) {
+      return res.status(400).json({
         ok: false,
-        message:
-          "Failed to submit payment request"
+        message: "Customer ID required"
       });
     }
+
+    if (
+      !Number.isFinite(amount) ||
+      amount <= 0
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid amount"
+      });
+    }
+
+    if (amount > 1000000) {
+      return res.status(400).json({
+        ok: false,
+        message: "Amount too large"
+      });
+    }
+
+    if (
+      !utr ||
+      utr.length < 4 ||
+      utr.length > 100
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message: "Valid UTR required"
+      });
+    }
+
+    const customer =
+      await pool.query(`
+        SELECT id
+        FROM customers
+        WHERE id = $1
+      `, [customerId]);
+
+    if (!customer.rows.length) {
+      return res.status(404).json({
+        ok: false,
+        message: "Customer not found"
+      });
+    }
+
+    try {
+      const result =
+        await pool.query(`
+          INSERT INTO wallet_requests
+          (
+            customer_id,
+            amount,
+            utr
+          )
+          VALUES
+          ($1,$2,$3)
+          RETURNING *
+        `, [
+          customerId,
+          amount,
+          utr
+        ]);
+
+      res.json({
+        ok: true,
+        message: "Payment request submitted",
+        request: result.rows[0]
+      });
+
+    } catch (insertError) {
+
+      if (insertError.code === "23505") {
+        return res.status(409).json({
+          ok: false,
+          message: "This UTR has already been submitted"
+        });
+      }
+
+      throw insertError;
+    }
+
+  } catch (error) {
+    console.error(
+      "WALLET REQUEST CREATE ERROR:",
+      error
+    );
+
+    res.status(500).json({
+      ok: false,
+      message: "Failed to submit payment request"
+    });
   }
-);
+});
 
 /* =========================================
    CUSTOMER PAYMENT REQUESTS
@@ -1056,7 +860,6 @@ app.get(
   async (req, res) => {
 
     try {
-
       const customerId =
         Number(req.params.customerId);
 
@@ -1070,22 +873,17 @@ app.get(
             status,
             created_at,
             reviewed_at
-
           FROM wallet_requests
-
           WHERE customer_id = $1
-
           ORDER BY id DESC
         `, [customerId]);
 
       res.json({
         ok: true,
-        requests:
-          result.rows
+        requests: result.rows
       });
 
     } catch (error) {
-
       console.error(
         "CUSTOMER WALLET REQUEST ERROR:",
         error
@@ -1093,8 +891,7 @@ app.get(
 
       res.status(500).json({
         ok: false,
-        message:
-          "Failed to load payment requests"
+        message: "Failed to load payment requests"
       });
     }
   }
@@ -1111,11 +908,9 @@ app.get(
     if (!checkAdmin(req, res)) return;
 
     try {
-
       const result =
         await pool.query(`
           SELECT
-
             wr.id,
             wr.customer_id,
             wr.amount,
@@ -1123,7 +918,6 @@ app.get(
             wr.status,
             wr.created_at,
             wr.reviewed_at,
-
             c.name AS customer_name,
             c.email AS customer_email
 
@@ -1133,25 +927,20 @@ app.get(
             ON c.id = wr.customer_id
 
           ORDER BY
-
             CASE
-              WHEN wr.status =
-                'pending'
+              WHEN wr.status = 'pending'
               THEN 0
               ELSE 1
             END,
-
             wr.id DESC
         `);
 
       res.json({
         ok: true,
-        requests:
-          result.rows
+        requests: result.rows
       });
 
     } catch (error) {
-
       console.error(
         "ADMIN WALLET REQUESTS ERROR:",
         error
@@ -1159,8 +948,7 @@ app.get(
 
       res.status(500).json({
         ok: false,
-        message:
-          "Failed to load payment requests"
+        message: "Failed to load payment requests"
       });
     }
   }
@@ -1180,19 +968,13 @@ app.patch(
       Number(req.params.id);
 
     const status =
-      String(
-        req.body.status || ""
-      )
+      String(req.body.status || "")
         .trim()
         .toLowerCase();
 
     if (
-      ![
-        "approved",
-        "rejected"
-      ].includes(status)
+      !["approved", "rejected"].includes(status)
     ) {
-
       return res.status(400).json({
         ok: false,
         message:
@@ -1204,14 +986,7 @@ app.patch(
       await pool.connect();
 
     try {
-
-      await client.query(
-        "BEGIN"
-      );
-
-      /* =========================================
-         LOCK PAYMENT REQUEST
-      ========================================= */
+      await client.query("BEGIN");
 
       const requestResult =
         await client.query(`
@@ -1221,36 +996,20 @@ app.patch(
           FOR UPDATE
         `, [requestId]);
 
-      if (
-        !requestResult.rows.length
-      ) {
-
-        await client.query(
-          "ROLLBACK"
-        );
+      if (!requestResult.rows.length) {
+        await client.query("ROLLBACK");
 
         return res.status(404).json({
           ok: false,
-          message:
-            "Payment request not found"
+          message: "Payment request not found"
         });
       }
 
       const request =
         requestResult.rows[0];
 
-      /* =========================================
-         PREVENT DOUBLE APPROVAL
-      ========================================= */
-
-      if (
-        request.status !==
-        "pending"
-      ) {
-
-        await client.query(
-          "ROLLBACK"
-        );
+      if (request.status !== "pending") {
+        await client.query("ROLLBACK");
 
         return res.status(409).json({
           ok: false,
@@ -1263,36 +1022,24 @@ app.patch(
          REJECT
       ========================================= */
 
-      if (
-        status === "rejected"
-      ) {
+      if (status === "rejected") {
 
         const result =
           await client.query(`
             UPDATE wallet_requests
-
             SET
-              status =
-                'rejected',
-
-              reviewed_at =
-                CURRENT_TIMESTAMP
-
+              status = 'rejected',
+              reviewed_at = CURRENT_TIMESTAMP
             WHERE id = $1
-
             RETURNING *
           `, [requestId]);
 
-        await client.query(
-          "COMMIT"
-        );
+        await client.query("COMMIT");
 
         return res.json({
           ok: true,
-          message:
-            "Payment request rejected",
-          request:
-            result.rows[0]
+          message: "Payment request rejected",
+          request: result.rows[0]
         });
       }
 
@@ -1306,27 +1053,19 @@ app.patch(
           FROM customers
           WHERE id = $1
           FOR UPDATE
-        `, [
-          request.customer_id
-        ]);
+        `, [request.customer_id]);
 
-      if (
-        !customerResult.rows.length
-      ) {
-
-        await client.query(
-          "ROLLBACK"
-        );
+      if (!customerResult.rows.length) {
+        await client.query("ROLLBACK");
 
         return res.status(404).json({
           ok: false,
-          message:
-            "Customer not found"
+          message: "Customer not found"
         });
       }
 
       /* =========================================
-         ADD MONEY TO WALLET
+         CREDIT WALLET
       ========================================= */
 
       const walletResult =
@@ -1340,13 +1079,10 @@ app.patch(
           ($1,$2)
 
           ON CONFLICT (customer_id)
-
           DO UPDATE SET
-
             balance =
               wallets.balance +
               EXCLUDED.balance,
-
             updated_at =
               CURRENT_TIMESTAMP
 
@@ -1363,39 +1099,27 @@ app.patch(
       const updateResult =
         await client.query(`
           UPDATE wallet_requests
-
           SET
-            status =
-              'approved',
-
-            reviewed_at =
-              CURRENT_TIMESTAMP
-
+            status = 'approved',
+            reviewed_at = CURRENT_TIMESTAMP
           WHERE id = $1
-
           RETURNING *
         `, [requestId]);
 
-      await client.query(
-        "COMMIT"
-      );
+      await client.query("COMMIT");
 
       res.json({
         ok: true,
         message:
           "Payment approved and wallet credited",
-        request:
-          updateResult.rows[0],
-        wallet:
-          walletResult.rows[0]
+        request: updateResult.rows[0],
+        wallet: walletResult.rows[0]
       });
 
     } catch (error) {
 
       try {
-        await client.query(
-          "ROLLBACK"
-        );
+        await client.query("ROLLBACK");
       } catch (_) {}
 
       console.error(
@@ -1410,7 +1134,6 @@ app.patch(
       });
 
     } finally {
-
       client.release();
     }
   }
@@ -1418,713 +1141,413 @@ app.patch(
 
 /* =========================================
    PURCHASE PRODUCT
-   RESELLER API INTEGRATION
 ========================================= */
 
-app.post(
-  "/api/purchase",
-  async (req, res) => {
+app.post("/api/purchase", async (req, res) => {
 
-    const customerId =
-      Number(req.body.customerId);
+  const customerId =
+    Number(req.body.customerId);
 
-    const productId =
-      Number(req.body.productId);
+  const productId =
+    Number(req.body.productId);
 
-    const duration =
-      String(req.body.duration || "").trim();
+  const duration =
+    String(req.body.duration || "").trim();
 
-    if (!customerId || !productId) {
-      return res.status(400).json({
+  if (!customerId || !productId) {
+    return res.status(400).json({
+      ok: false,
+      message:
+        "Customer and product required"
+    });
+  }
+
+  const client =
+    await pool.connect();
+
+  try {
+
+    await client.query("BEGIN");
+
+    /* =========================================
+       CUSTOMER
+    ========================================= */
+
+    const customerResult =
+      await client.query(`
+        SELECT *
+        FROM customers
+        WHERE id = $1
+        FOR UPDATE
+      `, [customerId]);
+
+    if (!customerResult.rows.length) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
         ok: false,
-        message: "Customer and product required"
+        message: "Customer not found"
       });
     }
 
-    const client = await pool.connect();
+    /* =========================================
+       PRODUCT
+    ========================================= */
+
+    const productResult =
+      await client.query(`
+        SELECT *
+        FROM products
+        WHERE id = $1
+        FOR UPDATE
+      `, [productId]);
+
+    if (!productResult.rows.length) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        ok: false,
+        message: "Product not found"
+      });
+    }
+
+    const product =
+      productResult.rows[0];
+
+    /* =========================================
+       MAINTENANCE / STATUS
+    ========================================= */
+
+    if (
+      product.maintenance === true ||
+      product.status !== "active"
+    ) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        ok: false,
+        message:
+          "Product is currently unavailable"
+      });
+    }
+
+    /* =========================================
+       PRICE
+    ========================================= */
+
+    let amount =
+      Number(product.price || 0);
+
+    if (
+      product.prices &&
+      typeof product.prices === "object" &&
+      duration &&
+      product.prices[duration] !== undefined
+    ) {
+      amount =
+        Number(product.prices[duration]);
+    }
+
+    if (
+      !Number.isFinite(amount) ||
+      amount <= 0
+    ) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        ok: false,
+        message:
+          "Invalid product price"
+      });
+    }
+
+    /* =========================================
+       WALLET
+    ========================================= */
+
+    const walletResult =
+      await client.query(`
+        SELECT *
+        FROM wallets
+        WHERE customer_id = $1
+        FOR UPDATE
+      `, [customerId]);
+
+    if (!walletResult.rows.length) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        ok: false,
+        message: "Wallet not found"
+      });
+    }
+
+    const wallet =
+      walletResult.rows[0];
+
+    const balance =
+      Number(wallet.balance);
+
+    if (balance < amount) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        ok: false,
+        message:
+          "Insufficient wallet balance"
+      });
+    }
+
+    /* =========================================
+       PRODUCT PID
+    ========================================= */
+
+    if (!product.pid) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        ok: false,
+        message:
+          "Product PID is not configured"
+      });
+    }
+
+    /* =========================================
+       ANDROID ID
+    ========================================= */
+
+    const androidId =
+      String(req.body.android_id || "").trim();
+
+    if (!androidId) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        ok: false,
+        message:
+          "Android ID required"
+      });
+    }
+
+    /* =========================================
+       RESELLER API DATA
+    ========================================= */
+
+    const apiData =
+      new URLSearchParams();
+
+    apiData.append(
+      "api_key",
+      process.env.RESELLER_API_KEY || ""
+    );
+
+    apiData.append(
+      "action",
+      "buy"
+    );
+
+    apiData.append(
+      "product_id",
+      product.pid
+    );
+
+    apiData.append(
+      "duration",
+      duration
+    );
+
+    apiData.append(
+      "android_id",
+      androidId
+    );
+
+    /* =========================================
+       RESELLER API
+    ========================================= */
+
+    let apiResponse;
 
     try {
 
-      await client.query("BEGIN");
+      const response =
+        await fetch(
+          "https://adminpanels.shop/api/reseller_v1.php",
+          {
+            method: "POST",
 
-      /* =========================================
-         CUSTOMER
-      ========================================= */
+            headers: {
+              "Content-Type":
+                "application/x-www-form-urlencoded",
 
-      const customerResult =
-        await client.query(`
-          SELECT *
-          FROM customers
-          WHERE id = $1
-          FOR UPDATE
-        `, [customerId]);
+              "x-master-key":
+                process.env.RESELLER_MASTER_KEY || ""
+            },
 
-      if (!customerResult.rows.length) {
+            body:
+              apiData.toString(),
 
-        await client.query("ROLLBACK");
+            signal:
+              AbortSignal.timeout(20000)
+          }
+        );
 
-        return res.status(404).json({
-          ok: false,
-          message: "Customer not found"
-        });
-      }
+      const rawText =
+        await response.text();
 
-      /* =========================================
-         PRODUCT
-      ========================================= */
-
-      const productResult =
-        await client.query(`
-          SELECT *
-          FROM products
-          WHERE id = $1
-          FOR UPDATE
-        `, [productId]);
-
-      if (!productResult.rows.length) {
-
-        await client.query("ROLLBACK");
-
-        return res.status(404).json({
-          ok: false,
-          message: "Product not found"
-        });
-      }
-
-      const product =
-        productResult.rows[0];
-
-      /* =========================================
-         MAINTENANCE / STATUS
-      ========================================= */
-
-      if (
-        product.maintenance === true ||
-        product.status !== "active"
-      ) {
-
-        await client.query("ROLLBACK");
-
-        return res.status(400).json({
-          ok: false,
-          message: "Product is currently unavailable"
-        });
-      }
-
-      /* =========================================
-         PRICE
-      ========================================= */
-
-      let amount =
-        Number(product.price || 0);
-
-      if (
-        product.prices &&
-        typeof product.prices === "object" &&
-        duration &&
-        product.prices[duration] !== undefined
-      ) {
-
-        amount =
-          Number(product.prices[duration]);
-      }
-
-      if (
-        !Number.isFinite(amount) ||
-        amount <= 0
-      ) {
-
-        await client.query("ROLLBACK");
-
-        return res.status(400).json({
-          ok: false,
-          message: "Invalid product price"
-        });
-      }
-
-      /* =========================================
-         WALLET
-      ========================================= */
-
-      const walletResult =
-        await client.query(`
-          SELECT *
-          FROM wallets
-          WHERE customer_id = $1
-          FOR UPDATE
-        `, [customerId]);
-
-      if (!walletResult.rows.length) {
-
-        await client.query("ROLLBACK");
-
-        return res.status(400).json({
-          ok: false,
-          message: "Wallet not found"
-        });
-      }
-
-      const wallet =
-        walletResult.rows[0];
-
-      const balance =
-        Number(wallet.balance);
-
-      if (balance < amount) {
-
-        await client.query("ROLLBACK");
-
-        return res.status(400).json({
-          ok: false,
-          message: "Insufficient wallet balance"
-        });
-      }
-
-      /* =========================================
-         PRODUCT PID
-      ========================================= */
-
-      if (!product.pid) {
-
-        await client.query("ROLLBACK");
-
-        return res.status(400).json({
-          ok: false,
-          message: "Product PID is not configured"
-        });
-      }
-
-      /* =========================================
-         ANDROID ID
-      ========================================= */
-
-      const androidId =
-        String(req.body.android_id || "").trim();
-
-      /*
-         Device-bound products need Android ID.
-         If your product requires it, send:
-         android_id
-         from the customer frontend.
-      */
-
-      if (!androidId) {
-
-        await client.query("ROLLBACK");
-
-        return res.status(400).json({
-          ok: false,
-          message: "Android ID required"
-        });
-      }
-
-      /* =========================================
-         RESELLER API DATA
-      ========================================= */
-
-      const apiData = new URLSearchParams();
-
-      apiData.append(
-        "api_key",
-        process.env.RESELLER_API_KEY || ""
-      );
-
-      apiData.append(
-        "action",
-        "buy"
-      );
-
-      apiData.append(
-        "product_id",
-        product.pid
-      );
-
-      apiData.append(
-        "duration",
-        duration
-      );
-
-      apiData.append(
-        "android_id",
-        androidId
-      );
-
-      /* =========================================
-         RESELLER API
-      ========================================= */
-
-      let apiResponse;
+      let parsed;
 
       try {
-
-        const response =
-          await fetch(
-            "https://adminpanels.shop/api/reseller_v1.php",
-            {
-              method: "POST",
-
-              headers: {
-                "Content-Type":
-                  "application/x-www-form-urlencoded",
-
-                "x-master-key":
-                  process.env.RESELLER_MASTER_KEY || ""
-              },
-
-              body:
-                apiData.toString(),
-
-              signal:
-                AbortSignal.timeout(20000)
-            }
-          );
-
-        const rawText =
-          await response.text();
-
-        let parsed;
-
-        try {
-          parsed = JSON.parse(rawText);
-        } catch (_) {
-          parsed = {
-            raw: rawText
-          };
-        }
-
-        apiResponse = {
-          httpStatus: response.status,
-          ok: response.ok,
-          data: parsed
+        parsed =
+          JSON.parse(rawText);
+      } catch (_) {
+        parsed = {
+          raw: rawText
         };
-
-      } catch (apiError) {
-
-        console.error(
-          "RESELLER API ERROR:",
-          apiError
-        );
-
-        await client.query("ROLLBACK");
-
-        return res.status(502).json({
-          ok: false,
-          message: "Reseller API unavailable"
-        });
       }
 
-      /* =========================================
-         API SUCCESS CHECK
-      ========================================= */
+      apiResponse = {
+        httpStatus: response.status,
+        ok: response.ok,
+        data: parsed
+      };
 
-      const apiDataResult =
-        apiResponse.data;
+    } catch (apiError) {
 
-      const apiSuccess =
-        apiResponse.ok === true &&
+      console.error(
+        "RESELLER API ERROR:",
+        apiError
+      );
+
+      await client.query("ROLLBACK");
+
+      return res.status(502).json({
+        ok: false,
+        message:
+          "Reseller API unavailable"
+      });
+    }
+
+    /* =========================================
+       API SUCCESS CHECK
+    ========================================= */
+
+    const apiDataResult =
+      apiResponse.data;
+
+    const apiSuccess =
+      apiResponse.ok === true &&
+      (
+        apiDataResult?.ok === true ||
+        apiDataResult?.success === true ||
+        apiDataResult?.status === "success"
+      );
+
+    if (!apiSuccess) {
+
+      console.error(
+        "RESELLER API PURCHASE FAILED:",
+        apiDataResult
+      );
+
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        ok: false,
+        message:
+          apiDataResult?.message ||
+          apiDataResult?.error ||
+          "Reseller purchase failed",
+
+        reseller_response:
+          apiDataResult
+      });
+    }
+
+    /* =========================================
+       DEDUCT WALLET
+    ========================================= */
+
+    const newBalance =
+      balance - amount;
+
+    await client.query(`
+      UPDATE wallets
+      SET
+        balance = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE customer_id = $2
+    `, [
+      newBalance,
+      customerId
+    ]);
+
+    /* =========================================
+       CREATE ORDER
+    ========================================= */
+
+    const orderResult =
+      await client.query(`
+        INSERT INTO orders
         (
-          apiDataResult?.ok === true ||
-          apiDataResult?.success === true ||
-          apiDataResult?.status === "success"
-        );
-
-      /*
-         IMPORTANT:
-         Wallet is deducted ONLY when the reseller
-         API explicitly reports success.
-      */
-
-      if (!apiSuccess) {
-
-        console.error(
-          "RESELLER API PURCHASE FAILED:",
-          apiDataResult
-        );
-
-        await client.query("ROLLBACK");
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            apiDataResult?.message ||
-            apiDataResult?.error ||
-            "Reseller purchase failed",
-
-          reseller_response:
-            apiDataResult
-        });
-      }
-
-      /* =========================================
-         DEDUCT WALLET
-      ========================================= */
-
-      const newBalance =
-        balance - amount;
-
-      await client.query(`
-        UPDATE wallets
-
-        SET
-          balance = $1,
-          updated_at = CURRENT_TIMESTAMP
-
-        WHERE customer_id = $2
+          customer_id,
+          product_id,
+          product_name,
+          duration,
+          amount,
+          status
+        )
+        VALUES
+        (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          'completed'
+        )
+        RETURNING *
       `, [
-        newBalance,
-        customerId
+        customerId,
+        product.id,
+        product.name,
+        duration,
+        amount
       ]);
 
-      /* =========================================
-         CREATE ORDER
-      ========================================= */
+    await client.query("COMMIT");
 
-      const orderResult =
-        await client.query(`
-          INSERT INTO orders
-          (
-            customer_id,
-            product_id,
-            product_name,
-            duration,
-            amount,
-            status
-          )
+    /* =========================================
+       SUCCESS
+    ========================================= */
 
-          VALUES
-          (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            'completed'
-          )
+    res.json({
+      ok: true,
+      message: "Purchase successful",
+      order: orderResult.rows[0],
+      balance: newBalance,
+      reseller: apiDataResult
+    });
 
-          RETURNING *
-        `, [
-          customerId,
-          product.id,
-          product.name,
-          duration,
-          amount
-        ]);
+  } catch (error) {
 
-      await client.query("COMMIT");
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) {}
 
-      /* =========================================
-         SUCCESS
-      ========================================= */
+    console.error(
+      "PURCHASE ERROR:",
+      error
+    );
 
-      res.json({
-        ok: true,
-        message: "Purchase successful",
+    res.status(500).json({
+      ok: false,
+      message: "Purchase failed"
+    });
 
-        order:
-          orderResult.rows[0],
-
-        balance:
-          newBalance,
-
-        reseller:
-          apiDataResult
-      });
-
-    } catch (error) {
-
-      try {
-        await client.query("ROLLBACK");
-      } catch (_) {}
-
-      console.error(
-        "PURCHASE ERROR:",
-        error
-      );
-
-      res.status(500).json({
-        ok: false,
-        message: "Purchase failed"
-      });
-
-    } finally {
-
-      client.release();
-    }
+  } finally {
+    client.release();
   }
-);
-
-      /* =========================================
-         CUSTOMER
-      ========================================= */
-
-      const customerResult =
-        await client.query(`
-          SELECT *
-          FROM customers
-          WHERE id = $1
-        `, [customerId]);
-
-      if (
-        !customerResult.rows.length
-      ) {
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Customer not found"
-        });
-      }
-
-      /* =========================================
-         PRODUCT
-      ========================================= */
-
-      const productResult =
-        await client.query(`
-          SELECT *
-          FROM products
-          WHERE id = $1
-          FOR UPDATE
-        `, [productId]);
-
-      if (
-        !productResult.rows.length
-      ) {
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(404).json({
-          ok: false,
-          message:
-            "Product not found"
-        });
-      }
-
-      const product =
-        productResult.rows[0];
-
-      /* =========================================
-         MAINTENANCE
-      ========================================= */
-
-      if (
-        product.maintenance === true ||
-        product.status !== "active"
-      ) {
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Product is currently unavailable"
-        });
-      }
-
-      /* =========================================
-         PRICE
-      ========================================= */
-
-      let amount =
-        Number(
-          product.price || 0
-        );
-
-      if (
-        product.prices &&
-        typeof product.prices ===
-          "object" &&
-        duration &&
-        product.prices[duration] !==
-          undefined
-      ) {
-
-        amount =
-          Number(
-            product.prices[duration]
-          );
-      }
-
-      if (
-        !Number.isFinite(amount) ||
-        amount <= 0
-      ) {
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Invalid product price"
-        });
-      }
-
-      /* =========================================
-         LOCK WALLET
-      ========================================= */
-
-      const walletResult =
-        await client.query(`
-          SELECT *
-          FROM wallets
-          WHERE customer_id = $1
-          FOR UPDATE
-        `, [customerId]);
-
-      if (
-        !walletResult.rows.length
-      ) {
-
-        await client.query(`
-          INSERT INTO wallets
-          (
-            customer_id,
-            balance
-          )
-          VALUES
-          ($1,0)
-
-          ON CONFLICT (customer_id)
-          DO NOTHING
-        `, [customerId]);
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Wallet has no balance"
-        });
-      }
-
-      const wallet =
-        walletResult.rows[0];
-
-      const balance =
-        Number(wallet.balance);
-
-      if (
-        balance < amount
-      ) {
-
-        await client.query(
-          "ROLLBACK"
-        );
-
-        return res.status(400).json({
-          ok: false,
-          message:
-            "Insufficient wallet balance"
-        });
-      }
-
-      /* =========================================
-         DEDUCT WALLET
-      ========================================= */
-
-      const newBalance =
-        balance - amount;
-
-      await client.query(`
-        UPDATE wallets
-
-        SET
-          balance = $1,
-          updated_at =
-            CURRENT_TIMESTAMP
-
-        WHERE customer_id = $2
-      `, [
-        newBalance,
-        customerId
-      ]);
-
-      /* =========================================
-         CREATE ORDER
-      ========================================= */
-
-      const orderResult =
-        await client.query(`
-          INSERT INTO orders
-          (
-            customer_id,
-            product_id,
-            product_name,
-            duration,
-            amount,
-            status
-          )
-
-          VALUES
-          (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            'completed'
-          )
-
-          RETURNING *
-        `, [
-          customerId,
-          product.id,
-          product.name,
-          duration,
-          amount
-        ]);
-
-      await client.query(
-        "COMMIT"
-      );
-
-      res.json({
-        ok: true,
-        message:
-          "Purchase successful",
-        order:
-          orderResult.rows[0],
-        balance:
-          newBalance
-      });
-
-    } catch (error) {
-
-      try {
-        await client.query(
-          "ROLLBACK"
-        );
-      } catch (_) {}
-
-      console.error(
-        "PURCHASE ERROR:",
-        error
-      );
-
-      res.status(500).json({
-        ok: false,
-        message:
-          "Purchase failed"
-      });
-
-    } finally {
-
-      client.release();
-    }
-  }
-);
+});
 
 /* =========================================
    CUSTOMER ORDERS
@@ -2135,7 +1558,6 @@ app.get(
   async (req, res) => {
 
     try {
-
       const customerId =
         Number(req.params.customerId);
 
@@ -2149,8 +1571,7 @@ app.get(
 
       res.json({
         ok: true,
-        orders:
-          result.rows
+        orders: result.rows
       });
 
     } catch (error) {
@@ -2184,7 +1605,6 @@ app.get(
       const result =
         await pool.query(`
           SELECT
-
             c.id,
             c.name,
             c.email,
@@ -2201,8 +1621,7 @@ app.get(
             COALESCE(
               SUM(
                 CASE
-                  WHEN o.status =
-                    'completed'
+                  WHEN o.status = 'completed'
                   THEN o.amount
                   ELSE 0
                 END
@@ -2266,7 +1685,6 @@ app.get(
       const result =
         await pool.query(`
           SELECT
-
             o.*,
 
             c.name AS customer_name,
@@ -2322,46 +1740,35 @@ app.get(
 
       const usersResult =
         await pool.query(`
-          SELECT
-            COUNT(*)::INTEGER AS count
+          SELECT COUNT(*)::INTEGER AS count
           FROM customers
         `);
 
       const ordersResult =
         await pool.query(`
-          SELECT
-            COUNT(*)::INTEGER AS count
+          SELECT COUNT(*)::INTEGER AS count
           FROM orders
           WHERE status = 'completed'
         `);
 
       const salesResult =
         await pool.query(`
-          SELECT
-            COALESCE(
-              SUM(amount),
-              0
-            ) AS total
-
+          SELECT COALESCE(
+            SUM(amount),
+            0
+          ) AS total
           FROM orders
-
-          WHERE status =
-            'completed'
+          WHERE status = 'completed'
         `);
 
       const pendingResult =
         await pool.query(`
-          SELECT
-            COUNT(*)::INTEGER AS count
-
+          SELECT COUNT(*)::INTEGER AS count
           FROM wallet_requests
-
-          WHERE status =
-            'pending'
+          WHERE status = 'pending'
         `);
 
       res.json({
-
         ok: true,
 
         users:
@@ -2372,8 +1779,7 @@ app.get(
 
         sales:
           Number(
-            salesResult.rows[0].total ||
-            0
+            salesResult.rows[0].total || 0
           ),
 
         pendingPayments:
@@ -2400,68 +1806,53 @@ app.get(
    LEGACY WALLET
 ========================================= */
 
-app.get(
-  "/api/wallet",
-  async (req, res) => {
-
-    res.json({
-      ok: false,
-      message:
-        "Use /api/wallet/:customerId"
-    });
-  }
-);
+app.get("/api/wallet", (req, res) => {
+  res.json({
+    ok: false,
+    message:
+      "Use /api/wallet/:customerId"
+  });
+});
 
 /* =========================================
    LEGACY ORDERS
 ========================================= */
 
-app.get(
-  "/api/orders",
-  async (req, res) => {
-
-    res.json({
-      ok: false,
-      message:
-        "Use /api/orders/:customerId"
-    });
-  }
-);
+app.get("/api/orders", (req, res) => {
+  res.json({
+    ok: false,
+    message:
+      "Use /api/orders/:customerId"
+  });
+});
 
 /* =========================================
    404
 ========================================= */
 
-app.use(
-  (req, res) => {
-
-    res.status(404).json({
-      ok: false,
-      message:
-        "Route not found"
-    });
-  }
-);
+app.use((req, res) => {
+  res.status(404).json({
+    ok: false,
+    message: "Route not found"
+  });
+});
 
 /* =========================================
    GLOBAL ERROR
 ========================================= */
 
-app.use(
-  (error, req, res, next) => {
+app.use((error, req, res, next) => {
+  console.error(
+    "GLOBAL ERROR:",
+    error
+  );
 
-    console.error(
-      "GLOBAL ERROR:",
-      error
-    );
-
-    res.status(500).json({
-      ok: false,
-      message:
-        "Internal server error"
-    });
-  }
-);
+  res.status(500).json({
+    ok: false,
+    message:
+      "Internal server error"
+  });
+});
 
 /* =========================================
    START SERVER
@@ -2470,15 +1861,20 @@ app.use(
 const PORT =
   process.env.PORT || 3000;
 
-app.listen(
-  PORT,
-  () => {
+async function startServer() {
+  await setupDatabase();
 
-    console.log(`
+  app.listen(
+    PORT,
+    () => {
+      console.log(`
 =========================================
  NEXUS STORE BACKEND
  PORT: ${PORT}
 =========================================
 `);
-  }
-);
+    }
+  );
+}
+
+startServer();
