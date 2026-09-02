@@ -1418,6 +1418,7 @@ app.patch(
 
 /* =========================================
    PURCHASE PRODUCT
+   RESELLER API INTEGRATION
 ========================================= */
 
 app.post(
@@ -1431,30 +1432,426 @@ app.post(
       Number(req.body.productId);
 
     const duration =
-      String(
-        req.body.duration || ""
-      ).trim();
+      String(req.body.duration || "").trim();
 
-    if (
-      !customerId ||
-      !productId
-    ) {
-
+    if (!customerId || !productId) {
       return res.status(400).json({
         ok: false,
-        message:
-          "Customer and product required"
+        message: "Customer and product required"
       });
     }
 
-    const client =
-      await pool.connect();
+    const client = await pool.connect();
 
     try {
 
-      await client.query(
-        "BEGIN"
+      await client.query("BEGIN");
+
+      /* =========================================
+         CUSTOMER
+      ========================================= */
+
+      const customerResult =
+        await client.query(`
+          SELECT *
+          FROM customers
+          WHERE id = $1
+          FOR UPDATE
+        `, [customerId]);
+
+      if (!customerResult.rows.length) {
+
+        await client.query("ROLLBACK");
+
+        return res.status(404).json({
+          ok: false,
+          message: "Customer not found"
+        });
+      }
+
+      /* =========================================
+         PRODUCT
+      ========================================= */
+
+      const productResult =
+        await client.query(`
+          SELECT *
+          FROM products
+          WHERE id = $1
+          FOR UPDATE
+        `, [productId]);
+
+      if (!productResult.rows.length) {
+
+        await client.query("ROLLBACK");
+
+        return res.status(404).json({
+          ok: false,
+          message: "Product not found"
+        });
+      }
+
+      const product =
+        productResult.rows[0];
+
+      /* =========================================
+         MAINTENANCE / STATUS
+      ========================================= */
+
+      if (
+        product.maintenance === true ||
+        product.status !== "active"
+      ) {
+
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          ok: false,
+          message: "Product is currently unavailable"
+        });
+      }
+
+      /* =========================================
+         PRICE
+      ========================================= */
+
+      let amount =
+        Number(product.price || 0);
+
+      if (
+        product.prices &&
+        typeof product.prices === "object" &&
+        duration &&
+        product.prices[duration] !== undefined
+      ) {
+
+        amount =
+          Number(product.prices[duration]);
+      }
+
+      if (
+        !Number.isFinite(amount) ||
+        amount <= 0
+      ) {
+
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          ok: false,
+          message: "Invalid product price"
+        });
+      }
+
+      /* =========================================
+         WALLET
+      ========================================= */
+
+      const walletResult =
+        await client.query(`
+          SELECT *
+          FROM wallets
+          WHERE customer_id = $1
+          FOR UPDATE
+        `, [customerId]);
+
+      if (!walletResult.rows.length) {
+
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          ok: false,
+          message: "Wallet not found"
+        });
+      }
+
+      const wallet =
+        walletResult.rows[0];
+
+      const balance =
+        Number(wallet.balance);
+
+      if (balance < amount) {
+
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          ok: false,
+          message: "Insufficient wallet balance"
+        });
+      }
+
+      /* =========================================
+         PRODUCT PID
+      ========================================= */
+
+      if (!product.pid) {
+
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          ok: false,
+          message: "Product PID is not configured"
+        });
+      }
+
+      /* =========================================
+         ANDROID ID
+      ========================================= */
+
+      const androidId =
+        String(req.body.android_id || "").trim();
+
+      /*
+         Device-bound products need Android ID.
+         If your product requires it, send:
+         android_id
+         from the customer frontend.
+      */
+
+      if (!androidId) {
+
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          ok: false,
+          message: "Android ID required"
+        });
+      }
+
+      /* =========================================
+         RESELLER API DATA
+      ========================================= */
+
+      const apiData = new URLSearchParams();
+
+      apiData.append(
+        "api_key",
+        process.env.RESELLER_API_KEY || ""
       );
+
+      apiData.append(
+        "action",
+        "buy"
+      );
+
+      apiData.append(
+        "product_id",
+        product.pid
+      );
+
+      apiData.append(
+        "duration",
+        duration
+      );
+
+      apiData.append(
+        "android_id",
+        androidId
+      );
+
+      /* =========================================
+         RESELLER API
+      ========================================= */
+
+      let apiResponse;
+
+      try {
+
+        const response =
+          await fetch(
+            "https://adminpanels.shop/api/reseller_v1.php",
+            {
+              method: "POST",
+
+              headers: {
+                "Content-Type":
+                  "application/x-www-form-urlencoded",
+
+                "x-master-key":
+                  process.env.RESELLER_MASTER_KEY || ""
+              },
+
+              body:
+                apiData.toString(),
+
+              signal:
+                AbortSignal.timeout(20000)
+            }
+          );
+
+        const rawText =
+          await response.text();
+
+        let parsed;
+
+        try {
+          parsed = JSON.parse(rawText);
+        } catch (_) {
+          parsed = {
+            raw: rawText
+          };
+        }
+
+        apiResponse = {
+          httpStatus: response.status,
+          ok: response.ok,
+          data: parsed
+        };
+
+      } catch (apiError) {
+
+        console.error(
+          "RESELLER API ERROR:",
+          apiError
+        );
+
+        await client.query("ROLLBACK");
+
+        return res.status(502).json({
+          ok: false,
+          message: "Reseller API unavailable"
+        });
+      }
+
+      /* =========================================
+         API SUCCESS CHECK
+      ========================================= */
+
+      const apiDataResult =
+        apiResponse.data;
+
+      const apiSuccess =
+        apiResponse.ok === true &&
+        (
+          apiDataResult?.ok === true ||
+          apiDataResult?.success === true ||
+          apiDataResult?.status === "success"
+        );
+
+      /*
+         IMPORTANT:
+         Wallet is deducted ONLY when the reseller
+         API explicitly reports success.
+      */
+
+      if (!apiSuccess) {
+
+        console.error(
+          "RESELLER API PURCHASE FAILED:",
+          apiDataResult
+        );
+
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          ok: false,
+          message:
+            apiDataResult?.message ||
+            apiDataResult?.error ||
+            "Reseller purchase failed",
+
+          reseller_response:
+            apiDataResult
+        });
+      }
+
+      /* =========================================
+         DEDUCT WALLET
+      ========================================= */
+
+      const newBalance =
+        balance - amount;
+
+      await client.query(`
+        UPDATE wallets
+
+        SET
+          balance = $1,
+          updated_at = CURRENT_TIMESTAMP
+
+        WHERE customer_id = $2
+      `, [
+        newBalance,
+        customerId
+      ]);
+
+      /* =========================================
+         CREATE ORDER
+      ========================================= */
+
+      const orderResult =
+        await client.query(`
+          INSERT INTO orders
+          (
+            customer_id,
+            product_id,
+            product_name,
+            duration,
+            amount,
+            status
+          )
+
+          VALUES
+          (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            'completed'
+          )
+
+          RETURNING *
+        `, [
+          customerId,
+          product.id,
+          product.name,
+          duration,
+          amount
+        ]);
+
+      await client.query("COMMIT");
+
+      /* =========================================
+         SUCCESS
+      ========================================= */
+
+      res.json({
+        ok: true,
+        message: "Purchase successful",
+
+        order:
+          orderResult.rows[0],
+
+        balance:
+          newBalance,
+
+        reseller:
+          apiDataResult
+      });
+
+    } catch (error) {
+
+      try {
+        await client.query("ROLLBACK");
+      } catch (_) {}
+
+      console.error(
+        "PURCHASE ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        ok: false,
+        message: "Purchase failed"
+      });
+
+    } finally {
+
+      client.release();
+    }
+  }
+);
 
       /* =========================================
          CUSTOMER
